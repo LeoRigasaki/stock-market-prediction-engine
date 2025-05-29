@@ -231,7 +231,7 @@ This project is for educational and portfolio demonstration purposes.
 - Use this code at your own risk
 
 ## 🔗 Connect & Follow Progress
-- **Email**: [lriorigasaki65@gmail.com]
+- **Email**: [riorigasaki65@gmail.com]
 
 ---
 
