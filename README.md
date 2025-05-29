@@ -184,9 +184,9 @@ stock-market-prediction-engine/
 |-----|------------|--------|------------------|
 | 1 | Project Setup | ✅ Complete | Environment, structure, configuration |
 | 2 | Data Acquisition | ✅ Complete | Dataset download, initial exploration |
-| 3 | Data Preprocessing | 🔄 In Progress | Cleaning, validation, quality checks |
-| 4 | Feature Engineering | ⏳ Planned | Technical indicators, feature selection |
-| 5 | Exploratory Analysis | ⏳ Planned | Patterns, correlations, insights |
+| 3 | Data Preprocessing | ✅ In Progress | Cleaning, validation, quality checks |
+| 4 | Feature Engineering | ✅ Planned | Technical indicators, feature selection |
+| 5 | Exploratory Analysis | 🔄 Planned | Patterns, correlations, insights |
 | 6 | Model Development | ⏳ Planned | Baseline models, validation framework |
 | 7 | Advanced Modeling | ⏳ Planned | Hyperparameter tuning, ensembles |
 | 8 | Model Evaluation | ⏳ Planned | Performance metrics, backtesting |
