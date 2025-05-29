@@ -1,0 +1,38 @@
+# Data Analysis & Processing
+pandas
+numpy
+scipy
+
+# Data Visualization
+matplotlib
+seaborn
+plotly
+
+# Machine Learning
+scikit-learn
+xgboost
+lightgbm
+
+# Data Sources
+kaggle
+requests
+beautifulsoup4
+
+# Technical Analysis
+ta
+yfinance
+
+# Environment & Configuration
+python-dotenv
+configparse
+
+# Jupyter & Development
+jupyter
+ipykernel
+
+# Utilities
+tqdm
+loguru
+
+# Web Framework (for future dashboard)
+streamlit
