@@ -1,307 +1,279 @@
 #!/usr/bin/env python3
 """
-Stock Market Prediction Engine - Day 4
-Advanced Feature Engineering with Technical Indicators
+Stock Market Prediction Engine - Day 5
+Advanced Exploratory Data Analysis & Market Pattern Recognition
 """
 
-from typing import List
 from src.config import Config
-from src.data_loader import DataLoader
-from src.feature_engineer import FeatureEngineer
+from src.market_analyzer import MarketAnalyzer
 from loguru import logger
 import sys
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
 from datetime import datetime
 
-def create_feature_visualizations(df: pd.DataFrame, selected_features: List[str], 
-                                correlation_analysis: pd.DataFrame):
-    """Create comprehensive feature analysis visualizations"""
-    logger.info("Creating feature analysis visualizations...")
+def run_comprehensive_market_analysis():
+    """Run comprehensive market analysis and pattern recognition"""
+    print("\n🔬 Starting Advanced Market Analysis and Pattern Recognition...")
     
-    fig, axes = plt.subplots(3, 3, figsize=(20, 15))
-    fig.suptitle('Feature Engineering Analysis - Day 4', fontsize=16, fontweight='bold')
+    # Initialize analyzer
+    analyzer = MarketAnalyzer()
     
-    # 1. Feature correlation heatmap (top 15 features)
-    if not correlation_analysis.empty and len(selected_features) > 5:
-        top_features = selected_features[:15]
-        if 'return_5d' in df.columns:
-            top_features.append('return_5d')
-        
-        available_features = [f for f in top_features if f in df.columns]
-        if len(available_features) > 3:
-            corr_matrix = df[available_features].corr()
-            
-            im = axes[0,0].imshow(corr_matrix.values, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
-            axes[0,0].set_xticks(range(len(corr_matrix.columns)))
-            axes[0,0].set_yticks(range(len(corr_matrix.index)))
-            axes[0,0].set_xticklabels(corr_matrix.columns, rotation=45, ha='right')
-            axes[0,0].set_yticklabels(corr_matrix.index)
-            axes[0,0].set_title('Feature Correlation Matrix')
-            plt.colorbar(im, ax=axes[0,0])
-    
-    # 2. Feature importance (correlation with target)
-    if not correlation_analysis.empty:
-        top_10_corr = correlation_analysis.head(10)
-        axes[0,1].barh(range(len(top_10_corr)), top_10_corr['correlation'])
-        axes[0,1].set_yticks(range(len(top_10_corr)))
-        axes[0,1].set_yticklabels(top_10_corr['feature'])
-        axes[0,1].set_xlabel('Absolute Correlation with Target')
-        axes[0,1].set_title('Top 10 Features by Correlation')
-        axes[0,1].grid(True, alpha=0.3)
-    
-    # 3. Technical indicator example (RSI)
-    if 'rsi' in df.columns:
-        sample_stock = df[df['Ticker'] == df['Ticker'].iloc[0]].tail(100)
-        axes[0,2].plot(sample_stock.index, sample_stock['rsi'], label='RSI', color='purple')
-        axes[0,2].axhline(y=70, color='r', linestyle='--', alpha=0.7, label='Overbought')
-        axes[0,2].axhline(y=30, color='g', linestyle='--', alpha=0.7, label='Oversold')
-        axes[0,2].set_title('RSI Technical Indicator')
-        axes[0,2].set_ylabel('RSI Value')
-        axes[0,2].legend()
-        axes[0,2].grid(True, alpha=0.3)
-    
-    # 4. Price vs Moving Averages
-    if all(col in df.columns for col in ['Close', 'sma_20', 'sma_50']):
-        sample_stock = df[df['Ticker'] == df['Ticker'].iloc[0]].tail(200)
-        axes[1,0].plot(sample_stock.index, sample_stock['Close'], label='Close Price', alpha=0.8)
-        axes[1,0].plot(sample_stock.index, sample_stock['sma_20'], label='SMA 20', alpha=0.7)
-        axes[1,0].plot(sample_stock.index, sample_stock['sma_50'], label='SMA 50', alpha=0.7)
-        axes[1,0].set_title('Price vs Moving Averages')
-        axes[1,0].set_ylabel('Price ($)')
-        axes[1,0].legend()
-        axes[1,0].grid(True, alpha=0.3)
-    
-    # 5. Volume analysis
-    if all(col in df.columns for col in ['Volume', 'volume_ratio']):
-        axes[1,1].scatter(df['Volume'], df['volume_ratio'], alpha=0.5, s=1)
-        axes[1,1].set_xlabel('Volume')
-        axes[1,1].set_ylabel('Volume Ratio')
-        axes[1,1].set_title('Volume vs Volume Ratio')
-        axes[1,1].set_xscale('log')
-        axes[1,1].grid(True, alpha=0.3)
-    
-    # 6. Bollinger Bands position distribution
-    if 'bb_position' in df.columns:
-        axes[1,2].hist(df['bb_position'].dropna(), bins=50, alpha=0.7, edgecolor='black')
-        axes[1,2].axvline(x=0, color='r', linestyle='--', alpha=0.7, label='Lower Band')
-        axes[1,2].axvline(x=1, color='r', linestyle='--', alpha=0.7, label='Upper Band')
-        axes[1,2].axvline(x=0.5, color='g', linestyle='--', alpha=0.7, label='Middle Band')
-        axes[1,2].set_xlabel('Bollinger Band Position')
-        axes[1,2].set_ylabel('Frequency')
-        axes[1,2].set_title('Distribution of BB Positions')
-        axes[1,2].legend()
-        axes[1,2].grid(True, alpha=0.3)
-    
-    # 7. Feature count by category
-    feature_categories = {
-        'Basic': len([f for f in df.columns if any(x in f for x in ['price_', 'volume_', 'body_'])]),
-        'Technical': len([f for f in df.columns if any(x in f for x in ['sma_', 'ema_', 'rsi', 'macd', 'bb_'])]),
-        'Time': len([f for f in df.columns if any(x in f for x in ['month', 'day_', 'quarter'])]),
-        'Lag': len([f for f in df.columns if 'lag_' in f or 'mean_' in f or 'std_' in f]),
-        'Target': len([f for f in df.columns if f.startswith('target_') or f.startswith('return_')])
-    }
-    
-    categories = list(feature_categories.keys())
-    counts = list(feature_categories.values())
-    
-    axes[2,0].bar(categories, counts, color=['skyblue', 'lightgreen', 'orange', 'pink', 'yellow'])
-    axes[2,0].set_title('Features by Category')
-    axes[2,0].set_ylabel('Number of Features')
-    axes[2,0].tick_params(axis='x', rotation=45)
-    axes[2,0].grid(True, alpha=0.3)
-    
-    # Add count labels on bars
-    for i, count in enumerate(counts):
-        axes[2,0].text(i, count + 0.5, str(count), ha='center', va='bottom')
-    
-    # 8. Target variable distribution
-    if 'return_5d' in df.columns:
-        returns = df['return_5d'].dropna()
-        axes[2,1].hist(returns, bins=50, alpha=0.7, edgecolor='black')
-        axes[2,1].axvline(x=returns.mean(), color='r', linestyle='--', 
-                         label=f'Mean: {returns.mean():.2f}%')
-        axes[2,1].set_xlabel('5-Day Return (%)')
-        axes[2,1].set_ylabel('Frequency')
-        axes[2,1].set_title('Distribution of 5-Day Returns')
-        axes[2,1].legend()
-        axes[2,1].grid(True, alpha=0.3)
-    
-    # 9. Feature completeness analysis
-    feature_completeness = []
-    for col in selected_features[:20]:  # Top 20 features
-        if col in df.columns:
-            completeness = (1 - df[col].isnull().sum() / len(df)) * 100
-            feature_completeness.append({'feature': col, 'completeness': completeness})
-    
-    if feature_completeness:
-        comp_df = pd.DataFrame(feature_completeness).sort_values('completeness')
-        axes[2,2].barh(range(len(comp_df)), comp_df['completeness'])
-        axes[2,2].set_yticks(range(len(comp_df)))
-        axes[2,2].set_yticklabels(comp_df['feature'])
-        axes[2,2].set_xlabel('Data Completeness (%)')
-        axes[2,2].set_title('Feature Data Completeness')
-        axes[2,2].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    # Save the plot
-    plots_dir = Config.PROJECT_ROOT / "plots"
-    plots_dir.mkdir(exist_ok=True)
-    plt.savefig(plots_dir / "day4_feature_analysis.png", dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    logger.info(f"Feature analysis visualizations saved to {plots_dir / 'day4_feature_analysis.png'}")
-
-def engineer_features_for_target_stocks():
-    """Main feature engineering workflow"""
-    print("\n🔧 Starting Advanced Feature Engineering...")
-    
-    # Initialize feature engineer
-    engineer = FeatureEngineer()
-    
-    # Load cleaned data and target stocks
-    print("\n📊 Loading cleaned data from Day 3...")
-    df = engineer.load_cleaned_data()
+    # Load feature data from Day 4
+    print("\n📊 Loading engineered features from Day 4...")
+    df = analyzer.load_feature_data()
     if df.empty:
-        print("❌ Failed to load cleaned data. Please run Day 3 first.")
+        print("❌ Failed to load feature data. Please run Day 4 first.")
         return None
     
-    target_stocks = engineer.load_target_stocks()
-    print(f"✅ Loaded data: {len(df):,} records from {df['Ticker'].nunique()} stocks")
-    print(f"🎯 Target stocks: {', '.join(target_stocks)}")
+    print(f"✅ Loaded data: {len(df):,} records, {df.shape[1]} features, {df['Ticker'].nunique()} stocks")
+    print(f"📅 Date range: {df['Date'].min().date()} to {df['Date'].max().date()}")
     
-    # Process features for target stocks only
-    print(f"\n⚙️ Processing features for {len(target_stocks)} target stocks...")
-    processed_stocks = []
+    # 1. Return Distribution Analysis
+    print("\n📈 Analyzing return distributions and statistical properties...")
+    return_analysis = analyzer.analyze_return_distributions(df)
     
-    for i, ticker in enumerate(target_stocks, 1):
-        print(f"   Processing {ticker} ({i}/{len(target_stocks)})...")
-        stock_data = df[df['Ticker'] == ticker].copy()
+    if return_analysis:
+        print("✅ Return Distribution Analysis Results:")
+        for return_type, stats in list(return_analysis.items())[:3]:  # Show first 3
+            print(f"   {return_type}:")
+            print(f"     Mean: {stats.get('mean', 0):.4f}%, Std: {stats.get('std', 0):.4f}%")
+            print(f"     Skewness: {stats.get('skewness', 0):.4f}, Kurtosis: {stats.get('kurtosis', 0):.4f}")
+            if 'is_normal_jb' in stats:
+                print(f"     Normal Distribution (Jarque-Bera): {'Yes' if stats['is_normal_jb'] else 'No'}")
+    
+    # 2. Market Regime Detection
+    print("\n🎯 Detecting market regimes using volatility and return patterns...")
+    regime_df = analyzer.detect_market_regimes(df)
+    
+    if 'Market_Regime' in regime_df.columns:
+        regime_counts = regime_df['Market_Regime'].value_counts()
+        print("✅ Market Regime Distribution:")
+        for regime, count in regime_counts.items():
+            pct = (count / len(regime_df)) * 100
+            print(f"   {regime}: {count:,} observations ({pct:.1f}%)")
+    
+    # 3. Stock Correlation Analysis
+    print("\n🔗 Analyzing inter-stock correlations and market relationships...")
+    correlation_matrix, beta_analysis = analyzer.analyze_stock_correlations(regime_df)
+    
+    if beta_analysis:
+        print("✅ Beta Analysis Results:")
+        beta_df = pd.DataFrame(beta_analysis).T.sort_values('beta', ascending=False)
+        print("   Top 5 Highest Beta Stocks:")
+        for idx, (stock, data) in enumerate(beta_df.head().iterrows(), 1):
+            print(f"     {idx}. {stock}: Beta={data['beta']:.3f}, R²={data['r_squared']:.3f}")
+    
+    # 4. Principal Component Analysis
+    print("\n🔬 Performing Principal Component Analysis on features...")
+    pca, pca_df, feature_importance = analyzer.perform_pca_analysis(regime_df)
+    
+    if pca:
+        variance_explained = pca.explained_variance_ratio_.cumsum()
+        print("✅ PCA Analysis Results:")
+        print(f"   First 5 components explain {variance_explained[4]:.1%} of variance")
+        print("   Top 5 Most Important Features for PC1:")
+        for idx, (_, row) in enumerate(feature_importance.head().iterrows(), 1):
+            print(f"     {idx}. {row['Feature']}: {row['PC1_Loading']:.4f}")
+    
+    # 5. Anomaly Detection
+    print("\n🚨 Detecting anomalies and outliers in stock data...")
+    anomaly_df = analyzer.detect_anomalies(regime_df)
+    
+    if 'is_anomaly' in anomaly_df.columns:
+        anomaly_count = anomaly_df['is_anomaly'].sum()
+        anomaly_pct = (anomaly_count / len(anomaly_df)) * 100
+        print(f"✅ Anomaly Detection Results:")
+        print(f"   Detected {anomaly_count:,} anomalies ({anomaly_pct:.2f}% of data)")
         
-        if len(stock_data) < 100:  # Skip stocks with insufficient data
-            print(f"   ⚠️ Skipping {ticker}: insufficient data ({len(stock_data)} records)")
-            continue
+        # Show top anomalous events by stock
+        anomalies_by_stock = anomaly_df[anomaly_df['is_anomaly']].groupby('Ticker').size().sort_values(ascending=False)
+        print("   Top 5 Stocks with Most Anomalies:")
+        for idx, (stock, count) in enumerate(anomalies_by_stock.head().items(), 1):
+            print(f"     {idx}. {stock}: {count} anomalies")
+    
+    # 6. Seasonal Pattern Analysis
+    print("\n📅 Analyzing seasonal and cyclical patterns...")
+    seasonal_analysis = analyzer.analyze_seasonal_patterns(anomaly_df)
+    
+    if seasonal_analysis:
+        print("✅ Seasonal Pattern Analysis:")
         
-        try:
-            processed_stock = engineer.process_single_stock(stock_data, ticker)
-            if not processed_stock.empty:
-                processed_stocks.append(processed_stock)
-                print(f"   ✅ {ticker}: {len(processed_stock)} records, {processed_stock.shape[1]} features")
-            else:
-                print(f"   ⚠️ {ticker}: No valid records after feature engineering")
-        except Exception as e:
-            print(f"   ❌ {ticker}: Error in processing - {str(e)}")
-            continue
+        # Monthly patterns
+        if 'monthly_patterns' in seasonal_analysis:
+            monthly_data = seasonal_analysis['monthly_patterns']
+            best_month = monthly_data.loc[monthly_data['mean'].idxmax()]
+            worst_month = monthly_data.loc[monthly_data['mean'].idxmin()]
+            print(f"   Best performing month: {best_month['Month_Name']} ({best_month['mean']:.3f}% avg return)")
+            print(f"   Worst performing month: {worst_month['Month_Name']} ({worst_month['mean']:.3f}% avg return)")
+        
+        # Day of week patterns
+        if 'day_of_week_patterns' in seasonal_analysis:
+            dow_data = seasonal_analysis['day_of_week_patterns']
+            best_day = dow_data.loc[dow_data['mean'].idxmax()]
+            worst_day = dow_data.loc[dow_data['mean'].idxmin()]
+            print(f"   Best performing day: {best_day['Day_Name']} ({best_day['mean']:.3f}% avg return)")
+            print(f"   Worst performing day: {worst_day['Day_Name']} ({worst_day['mean']:.3f}% avg return)")
+        
+        # Statistical significance
+        if 'monthly_anova' in seasonal_analysis:
+            anova_result = seasonal_analysis['monthly_anova']
+            significance = "significant" if anova_result['significant'] else "not significant"
+            print(f"   Monthly differences are {significance} (p-value: {anova_result['p_value']:.4f})")
     
-    if not processed_stocks:
-        print("❌ No stocks were successfully processed")
-        return None
+    # 7. Create Interactive Dashboard
+    print("\n📊 Creating comprehensive interactive analysis dashboard...")
+    try:
+        dashboard_fig = analyzer.create_interactive_dashboard(
+            anomaly_df, correlation_matrix, pca_df, seasonal_analysis
+        )
+        
+        # Save dashboard
+        plots_dir = Config.PROJECT_ROOT / "plots"
+        plots_dir.mkdir(exist_ok=True)
+        dashboard_path = plots_dir / "day5_interactive_dashboard.html"
+        dashboard_fig.write_html(str(dashboard_path))
+        print(f"✅ Interactive dashboard saved: {dashboard_path}")
+    except Exception as e:
+        print(f"⚠️ Dashboard creation failed: {e}")
     
-    # Combine all processed stocks
-    print(f"\n📊 Combining features from {len(processed_stocks)} stocks...")
-    combined_df = pd.concat(processed_stocks, ignore_index=True)
-    print(f"✅ Combined dataset: {len(combined_df):,} records, {combined_df.shape[1]} features")
+    # 8. Save All Analysis Results
+    print("\n💾 Saving comprehensive analysis results...")
+    saved_files = analyzer.save_analysis_results(
+        return_analysis, correlation_matrix, pca_df, seasonal_analysis, anomaly_df
+    )
     
-    # Analyze feature importance
-    print("\n🔍 Analyzing feature correlations and importance...")
-    correlation_analysis = engineer.analyze_feature_importance(combined_df)
-    
-    if not correlation_analysis.empty:
-        print("🏆 Top 10 Features by Correlation:")
-        for idx, row in correlation_analysis.head(10).iterrows():
-            print(f"   {row['feature']}: {row['correlation']:.4f}")
-    
-    # Select best features
-    print("\n🎯 Selecting optimal features for modeling...")
-    selected_features = engineer.select_features(combined_df, correlation_threshold=0.01)
-    print(f"✅ Selected {len(selected_features)} features for modeling")
-    
-    # Create visualizations
-    print("\n📊 Creating comprehensive feature analysis visualizations...")
-    create_feature_visualizations(combined_df, selected_features, correlation_analysis)
-    
-    # Save all results
-    print("\n💾 Saving engineered features and analysis...")
-    saved_files = engineer.save_engineered_features(combined_df, selected_features, correlation_analysis)
-    
-    print("✅ Saved files:")
-    for file_type, path in saved_files.items():
-        print(f"   {file_type}: {path}")
+    print("✅ Analysis results saved:")
+    for analysis_type, path in saved_files.items():
+        if path:
+            print(f"   {analysis_type}: {path}")
     
     return {
-        'combined_data': combined_df,
-        'selected_features': selected_features,
-        'correlation_analysis': correlation_analysis,
+        'processed_data': anomaly_df,
+        'return_analysis': return_analysis,
+        'correlation_matrix': correlation_matrix,
+        'pca_results': (pca, pca_df, feature_importance),
+        'seasonal_analysis': seasonal_analysis,
         'saved_files': saved_files
     }
 
-def main():
-    """Main execution function for Day 4"""
+def generate_market_insights(results):
+    """Generate actionable market insights from analysis"""
+    print("\n🎯 Generating Actionable Market Insights...")
     
-    print("🚀 Stock Market Prediction Engine - Day 4")
-    print("Advanced Feature Engineering with Technical Indicators")
-    print("=" * 60)
+    insights = []
+    
+    # Return distribution insights
+    if results['return_analysis']:
+        for return_type, stats in results['return_analysis'].items():
+            if 'return_5d' in return_type:
+                if stats.get('skewness', 0) > 0.5:
+                    insights.append(f"📈 {return_type} shows positive skew - more frequent small losses, occasional large gains")
+                elif stats.get('skewness', 0) < -0.5:
+                    insights.append(f"📉 {return_type} shows negative skew - more frequent small gains, occasional large losses")
+                
+                if stats.get('kurtosis', 0) > 3:
+                    insights.append(f"⚡ {return_type} shows fat tails - extreme events more likely than normal distribution")
+    
+    # Correlation insights
+    if not results['correlation_matrix'].empty:
+        corr_matrix = results['correlation_matrix']
+        avg_correlation = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].mean()
+        
+        if avg_correlation > 0.7:
+            insights.append("🔗 High inter-stock correlation - diversification benefits limited")
+        elif avg_correlation < 0.3:
+            insights.append("🎯 Low inter-stock correlation - good diversification opportunities")
+        else:
+            insights.append("⚖️ Moderate inter-stock correlation - balanced portfolio risk")
+    
+    # Seasonal insights
+    if results['seasonal_analysis'] and 'monthly_anova' in results['seasonal_analysis']:
+        if results['seasonal_analysis']['monthly_anova']['significant']:
+            insights.append("📅 Significant seasonal patterns detected - timing strategies may be effective")
+        else:
+            insights.append("🎲 No significant seasonal patterns - market timing unlikely to add value")
+    
+    # PCA insights
+    if results['pca_results'][0]:  # pca object exists
+        pca = results['pca_results'][0]
+        if pca.explained_variance_ratio_[0] > 0.3:
+            insights.append("🎯 Market dominated by single factor - systematic risk high")
+        else:
+            insights.append("🌐 Market driven by multiple factors - diversified risk sources")
+    
+    print("🔍 Key Market Insights:")
+    for i, insight in enumerate(insights, 1):
+        print(f"   {i}. {insight}")
+    
+    return insights
+
+def main():
+    """Main execution function for Day 5"""
+    
+    print("🚀 Stock Market Prediction Engine - Day 5")
+    print("Advanced Exploratory Data Analysis & Market Pattern Recognition")
+    print("=" * 70)
     
     # Check dependencies from previous days
     config = Config()
-    cleaned_data_path = config.PROCESSED_DATA_PATH / "cleaned_world_stocks.csv"
+    features_path = config.FEATURES_DATA_PATH / "selected_features.csv"
     
-    if not cleaned_data_path.exists():
-        print("\n❌ Cleaned data not found!")
-        print("Please run Day 3 first to generate cleaned datasets")
-        print("Command: python main.py  # (from Day 3)")
+    if not features_path.exists():
+        print("\n❌ Feature dataset not found!")
+        print("Please run Day 4 first to generate engineered features")
+        print("Command: python main.py  # (from Day 4)")
         return
     
-    # Run feature engineering
-    results = engineer_features_for_target_stocks()
+    # Run comprehensive analysis
+    results = run_comprehensive_market_analysis()
     
     if results is None:
-        print("\n❌ Feature engineering failed!")
+        print("\n❌ Market analysis failed!")
         return
     
+    # Generate actionable insights
+    insights = generate_market_insights(results)
+    
     # Display final results
-    combined_df = results['combined_data']
-    selected_features = results['selected_features']
+    processed_df = results['processed_data']
     
-    print("\n🎯 Day 4 Completed Successfully!")
-    print("=" * 60)
-    print("✅ Advanced feature engineering completed")
-    print("✅ Technical indicators calculated")
-    print("✅ Feature correlation analysis performed")
-    print("✅ Optimal features selected")
-    print("✅ Comprehensive visualizations created")
-    print("✅ Feature datasets saved")
+    print("\n🎯 Day 5 Completed Successfully!")
+    print("=" * 70)
+    print("✅ Advanced exploratory data analysis completed")
+    print("✅ Market regime detection performed")
+    print("✅ Statistical hypothesis testing conducted")
+    print("✅ Principal component analysis executed")
+    print("✅ Anomaly detection implemented")
+    print("✅ Seasonal pattern analysis completed")
+    print("✅ Interactive dashboard created")
+    print("✅ Comprehensive analysis results saved")
     
-    print(f"\n📊 Final Feature Engineering Summary:")
-    print(f"   Total records processed: {len(combined_df):,}")
-    print(f"   Stocks successfully processed: {combined_df['Ticker'].nunique()}")
-    print(f"   Total features created: {combined_df.shape[1]}")
-    print(f"   Selected features: {len(selected_features)}")
-    print(f"   Date range: {combined_df['Date'].min().date()} to {combined_df['Date'].max().date()}")
+    print(f"\n📊 Final Analysis Summary:")
+    print(f"   Records analyzed: {len(processed_df):,}")
+    print(f"   Stocks analyzed: {processed_df['Ticker'].nunique()}")
+    print(f"   Features analyzed: {processed_df.shape[1]}")
+    print(f"   Date range: {processed_df['Date'].min().date()} to {processed_df['Date'].max().date()}")
+    print(f"   Market insights generated: {len(insights)}")
     
-    print(f"\n🔧 Feature Categories Created:")
-    feature_categories = {
-        'Basic Features': len([f for f in combined_df.columns if any(x in f for x in ['price_', 'volume_', 'body_'])]),
-        'Technical Indicators': len([f for f in combined_df.columns if any(x in f for x in ['sma_', 'ema_', 'rsi', 'macd', 'bb_'])]),
-        'Time Features': len([f for f in combined_df.columns if any(x in f for x in ['month', 'day_', 'quarter'])]),
-        'Lag Features': len([f for f in combined_df.columns if 'lag_' in f or 'mean_' in f or 'std_' in f]),
-        'Target Variables': len([f for f in combined_df.columns if f.startswith('target_') or f.startswith('return_')])
-    }
+    if 'Market_Regime' in processed_df.columns:
+        regime_counts = processed_df['Market_Regime'].value_counts()
+        print(f"\n🎯 Market Regime Summary:")
+        for regime, count in regime_counts.head(3).items():
+            pct = (count / len(processed_df)) * 100
+            print(f"   {regime}: {pct:.1f}% of observations")
     
-    for category, count in feature_categories.items():
-        print(f"   {category}: {count}")
+    if 'is_anomaly' in processed_df.columns:
+        anomaly_count = processed_df['is_anomaly'].sum()
+        anomaly_pct = (anomaly_count / len(processed_df)) * 100
+        print(f"\n🚨 Anomaly Detection Summary:")
+        print(f"   Anomalies detected: {anomaly_count:,} ({anomaly_pct:.2f}%)")
     
-    print(f"\n🏆 Top 10 Selected Features:")
-    for i, feature in enumerate(selected_features[:10], 1):
-        print(f"   {i:2d}. {feature}")
-    
-    print("\n📋 Ready for Day 5:")
-    print("1. Exploratory data analysis with engineered features")
-    print("2. Market pattern recognition and regime detection")
-    print("3. Statistical analysis and hypothesis testing")
-    print("4. Interactive visualization dashboard creation")
+    print("\n📋 Ready for Day 6:")
+    print("1. Baseline machine learning model development")
+    print("2. Model evaluation and validation framework")
+    print("3. Feature importance analysis from ML perspective")
+    print("4. Cross-validation with time series considerations")
 
 if __name__ == "__main__":
     main()
