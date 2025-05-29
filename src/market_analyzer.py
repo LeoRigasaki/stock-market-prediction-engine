@@ -509,8 +509,8 @@ class MarketAnalyzer:
         if 'Market_Regime' in df.columns:
             regime_counts = df['Market_Regime'].value_counts()
             fig.add_trace(
-                go.Pie(labels=regime_counts.index, values=regime_counts.values, 
-                      name='Market Regimes'),
+                go.Bar(x=regime_counts.index, y=regime_counts.values, 
+                    name='Market Regimes'),
                 row=2, col=3
             )
         
