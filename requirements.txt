@@ -13,6 +13,9 @@ scikit-learn
 xgboost
 lightgbm
 
+# Hyperparameter Optimization
+optuna
+
 # Data Sources
 kaggle
 requests

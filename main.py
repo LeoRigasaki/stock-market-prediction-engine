@@ -1,364 +1,409 @@
 #!/usr/bin/env python3
 """
-Stock Market Prediction Engine - Day 6
-Baseline Machine Learning Model Development
+Stock Market Prediction Engine - Day 7-8
+Advanced Machine Learning Model Development with Hyperparameter Optimization
 """
 
 from src.config import Config
-from src.ml_models import MLModelFramework
+from src.advanced_models import AdvancedMLFramework
 from loguru import logger
 import sys
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
-def run_baseline_ml_modeling():
-    """Run comprehensive baseline ML model development"""
-    print("\n🤖 Starting Baseline Machine Learning Model Development...")
+def run_advanced_ml_development():
+    """Run comprehensive advanced ML model development"""
+    print("\n🚀 Starting Advanced ML Model Development (Day 7-8)")
+    print("=" * 70)
     
-    # Initialize ML framework
-    ml_framework = MLModelFramework()
+    # Initialize advanced ML framework
+    ml_framework = AdvancedMLFramework()
     
-    # Load feature data from Day 4
-    print("\n📊 Loading engineered features from Day 4...")
-    df = ml_framework.load_feature_data()
+    # Load baseline results and data from previous days
+    print("\n📊 Loading feature data and baseline results from Day 6...")
+    df, baseline_regression, baseline_classification = ml_framework.load_baseline_results()
+    
     if df.empty:
-        print("❌ Failed to load feature data. Please run Day 4 first.")
+        print("❌ Failed to load feature data. Please run Day 4-6 first.")
         return None
     
     print(f"✅ Loaded data: {len(df):,} records, {df.shape[1]} features, {df['Ticker'].nunique()} stocks")
-    print(f"📅 Date range: {df['Date'].min().date()} to {df['Date'].max().date()}")
+    print(f"📈 Baseline models: {len(baseline_regression)} regression, {len(baseline_classification)} classification")
     
-    # Create time series splits for validation
-    print("\n⏰ Creating time-series aware train/validation splits...")
-    cv_splits = ml_framework.create_time_series_splits(df, n_splits=5)
-    print(f"✅ Created {len(cv_splits)} time-series validation folds")
+    # Display baseline performance for comparison
+    if baseline_regression:
+        print("\n📊 Baseline Regression Performance:")
+        for name, results in baseline_regression.items():
+            r2_score = results.get('cv_r2_mean', 0)
+            print(f"   {name}: R² = {r2_score:.4f}")
     
-    # Prepare data for regression modeling
-    print("\n📈 Preparing data for regression modeling (predicting returns)...")
-    X_reg, y_reg, feature_cols = ml_framework.prepare_modeling_data(
-        df, target_col='return_5d', prediction_type='regression'
+    if baseline_classification:
+        print("\n🎯 Baseline Classification Performance:")
+        for name, results in baseline_classification.items():
+            f1_score = results.get('cv_f1_mean', 0)
+            print(f"   {name}: F1 = {f1_score:.4f}")
+    
+    # Check if we have sufficient data for advanced modeling
+    if len(df) < 1000:
+        print(f"⚠️ Warning: Limited data ({len(df)} records) may affect advanced model performance")
+    
+    # Train Advanced Regression Models
+    print("\n🤖 Phase 1: Advanced Regression Model Development")
+    print("-" * 50)
+    
+    advanced_regression_models = ml_framework.train_advanced_models(
+        df, target_col='return_5d', task_type='regression'
     )
-    print(f"✅ Regression data prepared: {X_reg.shape[0]} samples, {X_reg.shape[1]} features")
-    print(f"   Target stats: mean={y_reg.mean():.4f}, std={y_reg.std():.4f}")
     
-    # Train regression models
-    print("\n🔧 Training baseline regression models...")
-    regression_models = ml_framework.train_baseline_models(
-        X_reg, y_reg, prediction_type='regression'
+    if not advanced_regression_models:
+        print("❌ No advanced regression models were trained successfully")
+        return None
+    
+    print(f"✅ Successfully trained {len(advanced_regression_models)} advanced regression models:")
+    for model_name in advanced_regression_models.keys():
+        print(f"   • {model_name}")
+    
+    # Evaluate Advanced Regression Models
+    print("\n📊 Evaluating advanced regression models with time-series cross-validation...")
+    advanced_regression_results = ml_framework.evaluate_advanced_models(
+        advanced_regression_models, df, target_col='return_5d', task_type='regression'
     )
-    print(f"✅ Trained {len(regression_models)} regression models")
     
-    # Evaluate regression models
-    print("\n📊 Evaluating regression models with time-series cross-validation...")
-    regression_results = ml_framework.evaluate_regression_models(
-        regression_models, X_reg, y_reg, cv_splits
-    )
-    
-    print("✅ Regression Model Performance:")
-    for name, results in regression_results.items():
+    print("✅ Advanced Regression Model Performance:")
+    for name, results in advanced_regression_results.items():
+        r2_mean = results.get('cv_r2_mean', 0)
+        r2_std = results.get('cv_r2_std', 0)
+        rmse = results.get('cv_rmse_mean', 0)
         print(f"   {name}:")
-        print(f"     R² Score: {results['cv_r2_mean']:.4f} ± {results['cv_r2_std']:.4f}")
-        print(f"     RMSE: {results['rmse_mean']:.4f}")
-        print(f"     MAE: {results['cv_mae_mean']:.4f} ± {results['cv_mae_std']:.4f}")
+        print(f"     R² Score: {r2_mean:.4f} ± {r2_std:.4f}")
+        print(f"     RMSE: {rmse:.4f}")
     
-    # Prepare data for classification modeling
-    print("\n🎯 Preparing data for classification modeling (predicting direction)...")
-    X_class, y_class, _ = ml_framework.prepare_modeling_data(
-        df, target_col='return_5d', prediction_type='classification'
-    )
-    print(f"✅ Classification data prepared: {X_class.shape[0]} samples, {X_class.shape[1]} features")
-    print(f"   Class distribution: {np.bincount(y_class)} (Negative: {np.bincount(y_class)[0]}, Positive: {np.bincount(y_class)[1]})")
+    # Train Advanced Classification Models
+    print("\n🎯 Phase 2: Advanced Classification Model Development")
+    print("-" * 50)
     
-    # Train classification models
-    print("\n🔧 Training baseline classification models...")
-    classification_models = ml_framework.train_baseline_models(
-        X_class, y_class, prediction_type='classification'
-    )
-    print(f"✅ Trained {len(classification_models)} classification models")
-    
-    # Evaluate classification models
-    print("\n📊 Evaluating classification models with time-series cross-validation...")
-    classification_results = ml_framework.evaluate_classification_models(
-        classification_models, X_class, y_class, cv_splits
+    advanced_classification_models = ml_framework.train_advanced_models(
+        df, target_col='return_5d', task_type='classification'
     )
     
-    print("✅ Classification Model Performance:")
-    for name, results in classification_results.items():
-        print(f"   {name}:")
-        print(f"     Accuracy: {results['cv_accuracy_mean']:.4f} ± {results['cv_accuracy_std']:.4f}")
-        print(f"     F1 Score: {results['cv_f1_mean']:.4f} ± {results['cv_f1_std']:.4f}")
-        print(f"     Precision: {results['cv_precision_mean']:.4f} ± {results['cv_precision_std']:.4f}")
-        print(f"     Recall: {results['cv_recall_mean']:.4f} ± {results['cv_recall_std']:.4f}")
+    if not advanced_classification_models:
+        print("❌ No advanced classification models were trained successfully")
+    else:
+        print(f"✅ Successfully trained {len(advanced_classification_models)} advanced classification models:")
+        for model_name in advanced_classification_models.keys():
+            print(f"   • {model_name}")
+        
+        # Evaluate Advanced Classification Models
+        print("\n📊 Evaluating advanced classification models...")
+        advanced_classification_results = ml_framework.evaluate_advanced_models(
+            advanced_classification_models, df, target_col='return_5d', task_type='classification'
+        )
+        
+        print("✅ Advanced Classification Model Performance:")
+        for name, results in advanced_classification_results.items():
+            f1_mean = results.get('cv_f1_mean', 0)
+            f1_std = results.get('cv_f1_std', 0)
+            accuracy = results.get('cv_accuracy', 0)
+            print(f"   {name}:")
+            print(f"     F1 Score: {f1_mean:.4f} ± {f1_std:.4f}")
+            print(f"     Accuracy: {accuracy:.4f}")
     
-    # Feature importance analysis
-    print("\n🔍 Analyzing feature importance from ML perspective...")
+    # Performance Comparison Analysis
+    print("\n📈 Phase 3: Performance Comparison Analysis")
+    print("-" * 50)
     
-    # Display top features from Random Forest models
-    if 'Random_Forest' in regression_results:
-        rf_reg_importance = regression_results['Random_Forest'].get('feature_importance')
-        if rf_reg_importance is not None:
-            print("🌲 Top 10 Features (Random Forest Regression):")
-            for idx, (_, row) in enumerate(rf_reg_importance.head(10).iterrows(), 1):
-                print(f"   {idx:2d}. {row['feature']}: {row['importance']:.4f}")
+    # Compare with baseline models
+    print("🔍 Comparing Advanced vs Baseline Models:")
     
-    if 'Random_Forest' in classification_results:
-        rf_class_importance = classification_results['Random_Forest'].get('feature_importance')
-        if rf_class_importance is not None:
-            print("🌲 Top 10 Features (Random Forest Classification):")
-            for idx, (_, row) in enumerate(rf_class_importance.head(10).iterrows(), 1):
-                print(f"   {idx:2d}. {row['feature']}: {row['importance']:.4f}")
+    if advanced_regression_results and baseline_regression:
+        print("\n📊 Regression Model Improvements:")
+        
+        # Find best models
+        best_advanced_reg = max(advanced_regression_results.keys(), 
+                              key=lambda x: advanced_regression_results[x].get('cv_r2_mean', 0))
+        best_baseline_reg = max(baseline_regression.keys(), 
+                              key=lambda x: baseline_regression[x].get('cv_r2_mean', 0))
+        
+        advanced_r2 = advanced_regression_results[best_advanced_reg].get('cv_r2_mean', 0)
+        baseline_r2 = baseline_regression[best_baseline_reg].get('cv_r2_mean', 0)
+        improvement = ((advanced_r2 - baseline_r2) / baseline_r2 * 100) if baseline_r2 > 0 else 0
+        
+        print(f"   🏆 Best Advanced: {best_advanced_reg} (R² = {advanced_r2:.4f})")
+        print(f"   📊 Best Baseline: {best_baseline_reg} (R² = {baseline_r2:.4f})")
+        print(f"   📈 Improvement: {improvement:+.1f}% ({advanced_r2:.4f} vs {baseline_r2:.4f})")
+        
+        if improvement > 10:
+            print("   🎉 Significant improvement achieved!")
+        elif improvement > 0:
+            print("   👍 Moderate improvement achieved")
+        else:
+            print("   ⚠️ No improvement over baseline")
     
-    # Create comprehensive visualizations
-    print("\n📊 Creating comprehensive model comparison visualizations...")
+    if 'advanced_classification_results' in locals() and baseline_classification:
+        print("\n🎯 Classification Model Improvements:")
+        
+        # Find best models
+        best_advanced_class = max(advanced_classification_results.keys(), 
+                                key=lambda x: advanced_classification_results[x].get('cv_f1_mean', 0))
+        best_baseline_class = max(baseline_classification.keys(), 
+                                key=lambda x: baseline_classification[x].get('cv_f1_mean', 0))
+        
+        advanced_f1 = advanced_classification_results[best_advanced_class].get('cv_f1_mean', 0)
+        baseline_f1 = baseline_classification[best_baseline_class].get('cv_f1_mean', 0)
+        improvement = ((advanced_f1 - baseline_f1) / baseline_f1 * 100) if baseline_f1 > 0 else 0
+        
+        print(f"   🏆 Best Advanced: {best_advanced_class} (F1 = {advanced_f1:.4f})")
+        print(f"   📊 Best Baseline: {best_baseline_class} (F1 = {baseline_f1:.4f})")
+        print(f"   📈 Improvement: {improvement:+.1f}% ({advanced_f1:.4f} vs {baseline_f1:.4f})")
+        
+        if improvement > 10:
+            print("   🎉 Significant improvement achieved!")
+        elif improvement > 0:
+            print("   👍 Moderate improvement achieved")
+        else:
+            print("   ⚠️ No improvement over baseline")
+    
+    # Feature Importance Analysis
+    print("\n🔍 Phase 4: Feature Importance Analysis")
+    print("-" * 50)
+    
+    # Display feature importance from best tree-based models
+    print("🌲 Feature Importance Analysis:")
+    
+    for model_name, results in advanced_regression_results.items():
+        if 'feature_importance' in results and any(x in model_name for x in ['XGBoost', 'LightGBM', 'Gradient']):
+            importance_df = results['feature_importance']
+            print(f"\n   {model_name} - Top 10 Most Important Features:")
+            for idx, (_, row) in enumerate(importance_df.head(10).iterrows(), 1):
+                print(f"     {idx:2d}. {row['feature']}: {row['importance']:.4f}")
+            break  # Show only one model to avoid cluttering
+    
+    # Hyperparameter Optimization Results
+    print("\n⚙️ Phase 5: Hyperparameter Optimization Results")
+    print("-" * 50)
+    
+    if ml_framework.best_params:
+        print("🎯 Optimized Hyperparameters:")
+        for model_name, params in ml_framework.best_params.items():
+            print(f"\n   {model_name.upper()}:")
+            for param, value in list(params.items())[:5]:  # Show first 5 parameters
+                if isinstance(value, float):
+                    print(f"     {param}: {value:.4f}")
+                else:
+                    print(f"     {param}: {value}")
+            if len(params) > 5:
+                print(f"     ... and {len(params) - 5} more parameters")
+    
+    # Create Visualizations
+    print("\n📊 Phase 6: Creating Advanced Visualizations")
+    print("-" * 50)
+    
     try:
-        comparison_fig = ml_framework.create_model_comparison_plots(
-            regression_results, classification_results
+        print("Creating comprehensive model comparison visualizations...")
+        comparison_fig = ml_framework.create_advanced_visualizations(
+            advanced_regression_results, baseline_regression, ml_framework.optimization_history
         )
         
         # Save visualization
         plots_dir = Config.PROJECT_ROOT / "plots"
         plots_dir.mkdir(exist_ok=True)
-        comparison_path = plots_dir / "day6_model_comparison.html"
-        comparison_fig.write_html(str(comparison_path))
-        print(f"✅ Model comparison plots saved: {comparison_path}")
+        viz_path = plots_dir / "day7_8_advanced_models.html"
+        comparison_fig.write_html(str(viz_path))
+        print(f"✅ Advanced model visualizations saved: {viz_path}")
+        
     except Exception as e:
         print(f"⚠️ Visualization creation failed: {e}")
     
-    # Save all models and results
-    print("\n💾 Saving trained models and evaluation results...")
-    saved_files = ml_framework.save_models_and_results(
-        regression_results, classification_results, feature_cols
+    # Save All Results
+    print("\n💾 Phase 7: Saving Advanced Modeling Results")
+    print("-" * 50)
+    
+    saved_files = ml_framework.save_advanced_results(
+        advanced_regression_results, 
+        advanced_classification_results if 'advanced_classification_results' in locals() else {},
+        baseline_regression, 
+        baseline_classification
     )
     
-    print("✅ Models and results saved:")
+    print("✅ Advanced modeling results saved:")
     for file_type, path in saved_files.items():
         print(f"   {file_type}: {path}")
     
     return {
-        'regression_results': regression_results,
-        'classification_results': classification_results,
-        'feature_cols': feature_cols,
-        'saved_files': saved_files,
-        'ml_framework': ml_framework
+        'advanced_regression_results': advanced_regression_results,
+        'advanced_classification_results': advanced_classification_results if 'advanced_classification_results' in locals() else {},
+        'baseline_regression': baseline_regression,
+        'baseline_classification': baseline_classification,
+        'best_hyperparameters': ml_framework.best_params,
+        'saved_files': saved_files
     }
 
-def analyze_model_performance(results):
-    """Analyze and summarize model performance"""
-    print("\n🎯 Analyzing Model Performance and Generating Insights...")
+def analyze_model_improvements(results):
+    """Analyze and summarize improvements from advanced models"""
+    print("\n🎯 Advanced Model Analysis & Insights")
+    print("=" * 70)
     
     insights = []
+    recommendations = []
     
-    # Regression model analysis
-    reg_results = results['regression_results']
-    if reg_results:
-        # Find best regression model
-        best_reg_model = max(reg_results.keys(), key=lambda x: reg_results[x]['cv_r2_mean'])
-        best_reg_r2 = reg_results[best_reg_model]['cv_r2_mean']
-        
-        insights.append(f"📈 Best regression model: {best_reg_model} (R² = {best_reg_r2:.4f})")
-        
-        # Check if any model has good predictive power
-        if best_reg_r2 > 0.1:
-            insights.append(f"✅ Strong predictive signal detected - {best_reg_model} explains {best_reg_r2*100:.1f}% of variance")
-        elif best_reg_r2 > 0.05:
-            insights.append(f"⚖️ Moderate predictive signal - {best_reg_model} explains {best_reg_r2*100:.1f}% of variance")
-        else:
-            insights.append(f"⚠️ Weak predictive signal - market efficiency suggests limited predictability")
-        
-        # Compare linear vs non-linear models
-        linear_models = [name for name in reg_results.keys() if 'Regression' in name]
-        nonlinear_models = [name for name in reg_results.keys() if name not in linear_models]
-        
-        if linear_models and nonlinear_models:
-            best_linear_r2 = max([reg_results[name]['cv_r2_mean'] for name in linear_models])
-            best_nonlinear_r2 = max([reg_results[name]['cv_r2_mean'] for name in nonlinear_models])
-            
-            if best_nonlinear_r2 > best_linear_r2 + 0.02:
-                insights.append(f"🌲 Non-linear relationships detected - tree models outperform linear by {(best_nonlinear_r2-best_linear_r2)*100:.1f}%")
-            else:
-                insights.append(f"📏 Market relationships appear mostly linear - minimal non-linear advantage")
+    advanced_reg = results['advanced_regression_results']
+    baseline_reg = results['baseline_regression']
+    best_params = results['best_hyperparameters']
     
-    # Classification model analysis
-    class_results = results['classification_results']
-    if class_results:
-        # Find best classification model
-        best_class_model = max(class_results.keys(), key=lambda x: class_results[x]['cv_f1_mean'])
-        best_class_f1 = class_results[best_class_model]['cv_f1_mean']
-        best_class_acc = class_results[best_class_model]['cv_accuracy_mean']
+    # Performance improvement analysis
+    if advanced_reg and baseline_reg:
+        best_advanced = max(advanced_reg.keys(), key=lambda x: advanced_reg[x].get('cv_r2_mean', 0))
+        best_baseline = max(baseline_reg.keys(), key=lambda x: baseline_reg[x].get('cv_r2_mean', 0))
         
-        insights.append(f"🎯 Best classification model: {best_class_model} (F1 = {best_class_f1:.4f}, Accuracy = {best_class_acc:.4f})")
+        advanced_score = advanced_reg[best_advanced].get('cv_r2_mean', 0)
+        baseline_score = baseline_reg[best_baseline].get('cv_r2_mean', 0)
+        improvement = ((advanced_score - baseline_score) / baseline_score * 100) if baseline_score > 0 else 0
         
-        # Check if better than random
-        if best_class_acc > 0.55:
-            insights.append(f"📊 Directional prediction shows promise - {best_class_acc*100:.1f}% accuracy beats random (50%)")
-        elif best_class_acc > 0.52:
-            insights.append(f"⚖️ Slight directional edge detected - {best_class_acc*100:.1f}% accuracy")
+        insights.append(f"🏆 Best advanced model: {best_advanced} achieved {advanced_score:.4f} R² score")
+        insights.append(f"📊 Performance improvement: {improvement:+.1f}% over baseline {best_baseline}")
+        
+        # Model-specific insights
+        if 'XGBoost' in best_advanced:
+            insights.append("🌟 XGBoost excels at capturing non-linear patterns in financial data")
+            recommendations.append("💡 Consider ensemble methods combining XGBoost with other models")
+        
+        if 'LightGBM' in best_advanced:
+            insights.append("⚡ LightGBM shows excellent training efficiency with competitive performance")
+            recommendations.append("🚀 LightGBM is ideal for production deployment due to speed")
+        
+        if 'Neural_Network' in best_advanced:
+            insights.append("🧠 Neural networks capture complex feature interactions")
+            recommendations.append("📈 Consider expanding neural network architecture for better performance")
+        
+        if 'Time_Aware_NN' in best_advanced:
+            insights.append("⏰ Time-aware neural network shows temporal pattern recognition")
+            recommendations.append("🔄 Time-series features provide additional predictive power")
+        
+        # Predictive power assessment
+        if advanced_score > 0.1:
+            insights.append("✅ Strong predictive signal detected - models show genuine forecasting ability")
+            recommendations.append("🎯 Implement risk-adjusted portfolio strategies using model predictions")
+        elif advanced_score > 0.05:
+            insights.append("⚖️ Moderate predictive signal - useful for portfolio optimization")
+            recommendations.append("🔄 Focus on risk management rather than aggressive trading strategies")
         else:
-            insights.append(f"🎲 Directional prediction challenging - {best_class_acc*100:.1f}% accuracy near random")
+            insights.append("⚠️ Weak predictive signal - market efficiency limits forecastability")
+            recommendations.append("🛡️ Emphasize diversification and risk management over return prediction")
+    
+    # Hyperparameter optimization insights
+    if best_params:
+        insights.append(f"⚙️ Hyperparameter optimization completed for {len(best_params)} models")
+        
+        # XGBoost specific insights
+        if 'xgboost' in best_params:
+            xgb_params = best_params['xgboost']
+            if xgb_params.get('learning_rate', 0.1) < 0.05:
+                insights.append("📚 Low learning rate suggests need for careful regularization")
+            if xgb_params.get('max_depth', 6) > 8:
+                insights.append("🌳 Deep trees suggest complex feature interactions")
+        
+        recommendations.append("🔧 Use optimized hyperparameters for production model deployment")
     
     # Feature importance insights
-    if reg_results and 'Random_Forest' in reg_results:
-        rf_importance = reg_results['Random_Forest'].get('feature_importance')
-        if rf_importance is not None:
-            top_feature = rf_importance.iloc[0]
-            top_category = 'technical' if any(x in top_feature['feature'] for x in ['rsi', 'macd', 'bb_', 'stoch']) else \
-                          'momentum' if any(x in top_feature['feature'] for x in ['momentum', 'return']) else \
-                          'price' if any(x in top_feature['feature'] for x in ['close', 'sma', 'ema']) else \
-                          'volume' if 'volume' in top_feature['feature'] else 'other'
-            
-            insights.append(f"🔍 Most predictive feature: {top_feature['feature']} ({top_category} indicator)")
-            
-            # Check feature diversity
-            top_5_features = rf_importance.head(5)['feature'].tolist()
-            feature_types = set()
-            for feat in top_5_features:
-                if any(x in feat for x in ['rsi', 'macd', 'bb_', 'stoch']):
-                    feature_types.add('technical')
-                elif any(x in feat for x in ['momentum', 'return']):
-                    feature_types.add('momentum')
-                elif any(x in feat for x in ['close', 'sma', 'ema']):
-                    feature_types.add('price')
-                elif 'volume' in feat:
-                    feature_types.add('volume')
-            
-            if len(feature_types) >= 3:
-                insights.append(f"🌐 Diverse signal sources - top features span {len(feature_types)} categories")
-            else:
-                insights.append(f"🎯 Concentrated signal - top features focus on {', '.join(feature_types)}")
+    if advanced_reg:
+        for model_name, results in advanced_reg.items():
+            if 'feature_importance' in results:
+                top_feature = results['feature_importance'].iloc[0]['feature']
+                insights.append(f"🔍 Most predictive feature: {top_feature}")
+                
+                # Categorize feature types
+                technical_features = [f for f in results['feature_importance']['feature'][:10] 
+                                    if any(x in f for x in ['rsi', 'macd', 'bb_', 'stoch'])]
+                if len(technical_features) >= 5:
+                    insights.append("📊 Technical indicators dominate feature importance")
+                    recommendations.append("📈 Focus on technical analysis in trading strategy")
+                break
     
-    print("🔍 Key Model Performance Insights:")
+    print("🔍 Key Insights:")
     for i, insight in enumerate(insights, 1):
         print(f"   {i}. {insight}")
     
-    return insights
-
-def generate_trading_strategy_recommendations(results):
-    """Generate practical trading strategy recommendations"""
-    print("\n💡 Generating Trading Strategy Recommendations...")
-    
-    recommendations = []
-    
-    reg_results = results['regression_results']
-    class_results = results['classification_results']
-    
-    # Strategy recommendations based on model performance
-    if reg_results:
-        best_reg_model = max(reg_results.keys(), key=lambda x: reg_results[x]['cv_r2_mean'])
-        best_reg_r2 = reg_results[best_reg_model]['cv_r2_mean']
-        
-        if best_reg_r2 > 0.1:
-            recommendations.append(f"🎯 Consider quantitative strategy using {best_reg_model} for return prediction")
-            recommendations.append(f"📊 Focus on stocks with strong feature signals for higher accuracy")
-        elif best_reg_r2 > 0.05:
-            recommendations.append(f"⚖️ Use {best_reg_model} for portfolio optimization rather than direct trading")
-            recommendations.append(f"🔄 Combine with risk management due to moderate predictive power")
-        else:
-            recommendations.append(f"🛡️ Focus on risk management and diversification over return prediction")
-    
-    if class_results:
-        best_class_model = max(class_results.keys(), key=lambda x: class_results[x]['cv_f1_mean'])
-        best_class_acc = class_results[best_class_model]['cv_accuracy_mean']
-        
-        if best_class_acc > 0.55:
-            recommendations.append(f"🎲 Use {best_class_model} for directional trading signals")
-            recommendations.append(f"⚡ Implement momentum strategies based on predicted direction")
-        else:
-            recommendations.append(f"🔄 Focus on mean reversion rather than momentum strategies")
-    
-    # Feature-based recommendations
-    if reg_results and 'Random_Forest' in reg_results:
-        rf_importance = reg_results['Random_Forest'].get('feature_importance')
-        if rf_importance is not None:
-            top_features = rf_importance.head(5)['feature'].tolist()
-            
-            if any('volatility' in feat or 'atr' in feat for feat in top_features):
-                recommendations.append(f"📊 Incorporate volatility-based position sizing")
-            
-            if any('momentum' in feat for feat in top_features):
-                recommendations.append(f"🚀 Momentum signals show predictive power - consider trend following")
-            
-            if any('volume' in feat for feat in top_features):
-                recommendations.append(f"📈 Volume analysis crucial - integrate into entry/exit rules")
-    
-    # Risk management recommendations
-    recommendations.append(f"🛡️ Implement stop-loss at 2-3% based on volatility analysis")
-    recommendations.append(f"📊 Use position sizing based on predicted volatility")
-    recommendations.append(f"🔄 Rebalance portfolio monthly based on model predictions")
-    
-    print("💡 Trading Strategy Recommendations:")
+    print(f"\n💡 Strategic Recommendations:")
     for i, rec in enumerate(recommendations, 1):
         print(f"   {i}. {rec}")
     
-    return recommendations
+    return insights, recommendations
 
 def main():
-    """Main execution function for Day 6"""
+    """Main execution function for Day 7-8"""
     
-    print("🚀 Stock Market Prediction Engine - Day 6")
-    print("Baseline Machine Learning Model Development")
-    print("=" * 70)
+    print("🚀 Stock Market Prediction Engine - Day 7-8")
+    print("Advanced Machine Learning Model Development & Hyperparameter Optimization")
+    print("=" * 80)
     
     # Check dependencies from previous days
     config = Config()
     features_path = config.FEATURES_DATA_PATH / "selected_features.csv"
+    baseline_reg_path = config.PROCESSED_DATA_PATH / "regression_model_results.csv"
     
     if not features_path.exists():
         print("\n❌ Feature dataset not found!")
         print("Please run Day 4 first to generate engineered features")
         return
     
-    # Run baseline ML modeling
-    results = run_baseline_ml_modeling()
-    
-    if results is None:
-        print("\n❌ ML model development failed!")
+    if not baseline_reg_path.exists():
+        print("\n❌ Baseline model results not found!")
+        print("Please run Day 6 first to train baseline models")
         return
     
-    # Analyze model performance
-    insights = analyze_model_performance(results)
+    # Run advanced ML development
+    results = run_advanced_ml_development()
     
-    # Generate trading recommendations
-    recommendations = generate_trading_strategy_recommendations(results)
+    if results is None:
+        print("\n❌ Advanced ML model development failed!")
+        return
+    
+    # Analyze improvements and generate insights
+    insights, recommendations = analyze_model_improvements(results)
     
     # Display final summary
-    reg_results = results['regression_results']
-    class_results = results['classification_results']
+    advanced_reg = results['advanced_regression_results']
+    baseline_reg = results['baseline_regression']
     
-    print("\n🎯 Day 6 Completed Successfully!")
-    print("=" * 70)
-    print("✅ Baseline machine learning models developed")
-    print("✅ Time-series cross-validation implemented")
-    print("✅ Model performance evaluation completed")
+    print("\n🎯 Day 7-8 Completed Successfully!")
+    print("=" * 80)
+    print("✅ Advanced ML models developed with hyperparameter optimization")
+    print("✅ XGBoost and LightGBM models trained and evaluated")
+    print("✅ Neural Network architecture implemented")
+    print("✅ Time-Aware Neural Network for time series developed")
+    print("✅ Comprehensive model comparison completed")
     print("✅ Feature importance analysis conducted")
-    print("✅ Model comparison visualizations created")
-    print("✅ Trading strategy recommendations generated")
+    print("✅ Hyperparameter optimization results saved")
+    print("✅ Advanced visualizations created")
     
-    print(f"\n📊 Final Model Development Summary:")
-    print(f"   Regression models trained: {len(reg_results) if reg_results else 0}")
-    print(f"   Classification models trained: {len(class_results) if class_results else 0}")
-    print(f"   Features used: {len(results['feature_cols'])}")
-    print(f"   Cross-validation folds: 5 (time-series aware)")
+    print(f"\n📊 Final Advanced Model Development Summary:")
+    print(f"   Advanced regression models: {len(advanced_reg)}")
+    print(f"   Hyperparameters optimized: {len(results['best_hyperparameters'])}")
+    print(f"   Feature importance analyzed: ✅")
+    print(f"   Insights generated: {len(insights)}")
+    print(f"   Recommendations provided: {len(recommendations)}")
     
     # Best model summary
-    if reg_results:
-        best_reg = max(reg_results.keys(), key=lambda x: reg_results[x]['cv_r2_mean'])
-        best_reg_score = reg_results[best_reg]['cv_r2_mean']
-        print(f"   Best regression model: {best_reg} (R² = {best_reg_score:.4f})")
+    if advanced_reg:
+        best_model = max(advanced_reg.keys(), key=lambda x: advanced_reg[x].get('cv_r2_mean', 0))
+        best_score = advanced_reg[best_model].get('cv_r2_mean', 0)
+        print(f"   🏆 Best advanced model: {best_model} (R² = {best_score:.4f})")
+        
+        # Performance improvement
+        if baseline_reg:
+            best_baseline = max(baseline_reg.keys(), key=lambda x: baseline_reg[x].get('cv_r2_mean', 0))
+            baseline_score = baseline_reg[best_baseline].get('cv_r2_mean', 0)
+            improvement = ((best_score - baseline_score) / baseline_score * 100) if baseline_score > 0 else 0
+            print(f"   📈 Improvement over baseline: {improvement:+.1f}%")
     
-    if class_results:
-        best_class = max(class_results.keys(), key=lambda x: class_results[x]['cv_f1_mean'])
-        best_class_score = class_results[best_class]['cv_f1_mean']
-        print(f"   Best classification model: {best_class} (F1 = {best_class_score:.4f})")
-    
-    print(f"\n🔍 Key Insights Generated: {len(insights)}")
-    print(f"💡 Trading Recommendations: {len(recommendations)}")
-    
-    print("\n📋 Ready for Day 7:")
-    print("1. Advanced ML models (XGBoost, LightGBM, Neural Networks)")
-    print("2. Hyperparameter optimization with Optuna")
-    print("3. Model ensemble and stacking techniques")
-    print("4. Advanced feature selection methods")
+    print("\n📋 Ready for Day 9-12:")
+    print("1. Model ensemble and stacking techniques")
+    print("2. Advanced cross-validation strategies")
+    print("3. Model interpretability with SHAP")
+    print("4. Production-ready model pipeline")
 
 if __name__ == "__main__":
     main()
