@@ -22,6 +22,57 @@ from pathlib import Path
 
 from .config import Config
 
+class SimpleEnsemble:
+    def __init__(self, models):
+        self.models = models
+
+    def fit(self, X, y):
+        return self
+
+    def predict(self, X):
+        import numpy as np
+        predictions = []
+        for name, model in self.models.items():
+            try:
+                pred = model.predict(X)
+                if not np.any(np.isnan(pred)) and not np.any(np.isinf(pred)):
+                    predictions.append(pred)
+            except:
+                continue
+        if predictions:
+            return np.mean(predictions, axis=0)
+        else:
+            return np.zeros(len(X))
+
+    def get_params(self, deep=True):
+        return {}
+
+    def set_params(self, **params):
+        return self
+class StackedEnsemble:
+    def __init__(self, base_models, meta_learner):
+        self.base_models = base_models
+        self.meta_learner = meta_learner
+                
+    def fit(self, X, y):
+        return self
+                
+    def predict(self, X):
+        base_preds = np.zeros((len(X), len(self.base_models)))
+        
+        for i, (name, model) in enumerate(self.base_models.items()):
+            try:
+                base_preds[:, i] = model.predict(X)
+            except:
+                base_preds[:, i] = 0
+        
+        return self.meta_learner.predict(base_preds)
+            
+    def get_params(self, deep=True):
+        return {}
+            
+    def set_params(self, **params):
+        return self
 class EnsembleFramework:
     """Comprehensive ensemble methods framework with proper sklearn implementation"""
     
@@ -166,32 +217,6 @@ class EnsembleFramework:
         meta_learner.fit(oof_predictions, y)
         
         logger.info("Fast stacked ensemble created")
-        
-        class StackedEnsemble:
-            def __init__(self, base_models, meta_learner):
-                self.base_models = base_models
-                self.meta_learner = meta_learner
-                
-            def fit(self, X, y):
-                return self
-                
-            def predict(self, X):
-                base_preds = np.zeros((len(X), len(self.base_models)))
-                
-                for i, (name, model) in enumerate(self.base_models.items()):
-                    try:
-                        base_preds[:, i] = model.predict(X)
-                    except:
-                        base_preds[:, i] = 0
-                
-                return self.meta_learner.predict(base_preds)
-            
-            def get_params(self, deep=True):
-                return {}
-            
-            def set_params(self, **params):
-                return self
-        
         return StackedEnsemble(self.base_models, meta_learner)
     
     def create_neural_ensemble(self, X: pd.DataFrame, y: np.ndarray) -> Any:
@@ -261,36 +286,6 @@ class EnsembleFramework:
     def create_simple_ensemble(self) -> Any:
         """Create simple averaging ensemble - with sklearn compatibility"""
         logger.info("Creating simple averaging ensemble...")
-        
-        class SimpleEnsemble:
-            def __init__(self, models):
-                self.models = models
-                
-            def fit(self, X, y):
-                return self
-                
-            def predict(self, X):
-                predictions = []
-                
-                for name, model in self.models.items():
-                    try:
-                        pred = model.predict(X)
-                        if not np.any(np.isnan(pred)) and not np.any(np.isinf(pred)):
-                            predictions.append(pred)
-                    except:
-                        continue
-                
-                if predictions:
-                    return np.mean(predictions, axis=0)
-                else:
-                    return np.zeros(len(X))
-            
-            def get_params(self, deep=True):
-                return {}
-            
-            def set_params(self, **params):
-                return self
-        
         return SimpleEnsemble(self.base_models)
     
     def create_all_ensembles(self, X: pd.DataFrame, y: np.ndarray) -> Dict:
