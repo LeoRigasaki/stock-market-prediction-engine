@@ -25,6 +25,11 @@ beautifulsoup4
 ta
 yfinance
 
+# Real-time & Async
+aiohttp
+asyncio
+schedule
+
 # Environment & Configuration
 python-dotenv
 configparse
