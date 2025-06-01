@@ -1,363 +1,344 @@
 #!/usr/bin/env python3
 """
-Stock Market Prediction Engine - Day 12
-Real-Time Prediction System & Model Serving Infrastructure
+Stock Market Prediction Engine - Day 15
+System Integration & Testing
 """
 
 import asyncio
-import sys
+import json
+import time
 from datetime import datetime
-from src.config import Config
-from src.realtime_prediction import RealTimePredictionEngine, ModelDriftDetector
-from loguru import logger
+from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-def display_banner():
-    """Display Day 12 banner"""
-    print("🚀 Stock Market Prediction Engine - Day 12")
-    print("Real-Time Prediction System & Model Serving Infrastructure")
-    print("=" * 70)
+from src.config import Config
+from src.integration_testing import SystemIntegrationTester, SystemOptimizer
 
-def check_prerequisites():
-    """Check if all prerequisites are available"""
-    config = Config()
+def display_banner():
+    """Display Day 15 banner"""
+    print("Stock Market Prediction Engine - Day 15")
+    print("System Integration & Testing")
+    print("=" * 50)
+
+def display_test_summary(report: dict):
+    """Display test results summary"""
+    summary = report['test_summary']
     
-    required_files = [
-        config.PROCESSED_DATA_PATH / "day11_risk_summary.csv",
-        config.FEATURES_DATA_PATH / "selected_features_list.txt",
-        config.PROJECT_ROOT / "models" / "ensemble" / "simple_average_ensemble.joblib"
+    print(f"\nTest Execution Summary:")
+    print(f"Total Tests: {summary['total_tests']}")
+    print(f"Passed: {summary['passed']} ✅")
+    print(f"Failed: {summary['failed']} ❌")
+    print(f"Warnings: {summary['warnings']} ⚠️")
+    print(f"Success Rate: {summary['success_rate']:.1f}%")
+    print(f"Execution Time: {summary['total_execution_time']:.2f}s")
+    print(f"System Status: {report['system_status']}")
+
+def display_detailed_results(report: dict):
+    """Display detailed test results"""
+    print("\nDetailed Test Results:")
+    print("-" * 30)
+    
+    for test_name, result in report['test_results'].items():
+        status_icon = "✅" if result['status'] == "PASS" else "❌" if result['status'] == "FAIL" else "⚠️"
+        print(f"{status_icon} {test_name}")
+        if result['details']:
+            print(f"   {result['details']}")
+        if result['execution_time'] > 0:
+            print(f"   Time: {result['execution_time']:.2f}s")
+
+def display_performance_metrics(report: dict):
+    """Display performance metrics"""
+    if report['performance_metrics']:
+        print("\nPerformance Metrics:")
+        print("-" * 20)
+        for metric, value in report['performance_metrics'].items():
+            if isinstance(value, float):
+                print(f"{metric}: {value:.2f}s")
+            else:
+                print(f"{metric}: {value}")
+
+def display_recommendations(report: dict):
+    """Display system recommendations"""
+    if report['recommendations']:
+        print("\nSystem Recommendations:")
+        print("-" * 25)
+        for i, rec in enumerate(report['recommendations'], 1):
+            print(f"{i}. {rec}")
+
+def save_test_report(report: dict) -> str:
+    """Save test report to file"""
+    config = Config()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = config.PROCESSED_DATA_PATH / f"integration_test_report_{timestamp}.json"
+    
+    with open(report_path, 'w') as f:
+        json.dump(report, f, indent=2, default=str)
+    
+    return str(report_path)
+
+async def run_integration_tests():
+    """Run comprehensive integration tests"""
+    print("Initializing System Integration Tester...")
+    
+    tester = SystemIntegrationTester()
+    
+    print("Running comprehensive integration tests...")
+    report = await tester.run_comprehensive_tests()
+    
+    # Display results
+    display_test_summary(report)
+    display_detailed_results(report)
+    display_performance_metrics(report)
+    display_recommendations(report)
+    
+    # Save report
+    report_path = save_test_report(report)
+    print(f"\nTest report saved: {report_path}")
+    
+    return report
+
+def run_system_optimization():
+    """Run system optimization"""
+    print("\nInitializing System Optimizer...")
+    
+    optimizer = SystemOptimizer()
+    
+    # Optimize prediction pipeline
+    print("Optimizing prediction pipeline...")
+    pipeline_results = optimizer.optimize_prediction_pipeline()
+    
+    if pipeline_results.get('optimizations_applied'):
+        print("Pipeline Optimizations:")
+        for opt in pipeline_results['optimizations_applied']:
+            print(f"✅ {opt}")
+    
+    if pipeline_results.get('performance_improvements'):
+        print("Performance Improvements:")
+        for improvement, value in pipeline_results['performance_improvements'].items():
+            print(f"📈 {improvement}: {value}")
+    
+    # Clean up system files
+    print("\nCleaning up system files...")
+    cleanup_results = optimizer.cleanup_system_files()
+    
+    if cleanup_results.get('files_cleaned', 0) > 0:
+        print(f"✅ Cleaned {cleanup_results['files_cleaned']} files")
+        print(f"💾 Freed {cleanup_results['space_freed_mb']:.2f} MB")
+    
+    return {
+        'pipeline_optimization': pipeline_results,
+        'cleanup_results': cleanup_results
+    }
+
+def validate_system_health():
+    """Quick system health validation"""
+    print("\nValidating system health...")
+    
+    config = Config()
+    health_checks = {
+        'configuration': False,
+        'data_files': False,
+        'model_files': False,
+        'directory_structure': False
+    }
+    
+    # Check configuration
+    try:
+        config.create_directories()
+        health_checks['configuration'] = True
+        print("✅ Configuration system")
+    except:
+        print("❌ Configuration system")
+    
+    # Check essential data files
+    essential_files = [
+        config.FEATURES_DATA_PATH / "selected_features.csv",
+        config.PROCESSED_DATA_PATH / "target_stocks.txt"
     ]
     
-    missing_files = []
-    for file_path in required_files:
-        if not file_path.exists():
-            missing_files.append(str(file_path))
-    
-    if missing_files:
-        print("❌ Missing required files:")
-        for file in missing_files:
-            print(f"   • {file}")
-        print("\nPlease ensure Days 9-11 completed successfully.")
-        return False
-    
-    print("✅ All prerequisites found!")
-    return True
-
-async def run_single_prediction_cycle():
-    """Run a single prediction cycle for testing"""
-    print("\n🎯 Phase 1: Single Prediction Cycle Test")
-    print("-" * 50)
-    
-    # Initialize prediction engine
-    engine = RealTimePredictionEngine()
-    
-    # Load models
-    print("📦 Loading production models...")
-    if not engine.load_production_models():
-        print("❌ Failed to load models!")
-        return False
-    
-    print(f"✅ Loaded {len(engine.models)} models")
-    print(f"🎯 Best model: {engine.best_model.__class__.__name__ if engine.best_model else 'None'}")
-    
-    # Run prediction cycle
-    print("\n🔄 Running real-time prediction cycle...")
-    results = await engine.run_realtime_cycle()
-    
-    # Display results with better formatting for non-zero predictions
-    print("\n📈 PREDICTION RESULTS:")
-    print("=" * 60)
-    
-    predictions = results.get('predictions', {})
-    if predictions:
-        for symbol, pred_data in predictions.items():
-            primary = pred_data.get('primary', {})
-            prediction = primary.get('prediction', 0)
-            confidence = primary.get('confidence', 'unknown')
-            
-            direction = "📈 BUY" if prediction > 0.001 else "📉 SELL" if prediction < -0.001 else "⚖️ HOLD"
-            strength = "STRONG" if abs(prediction) > 0.02 else "WEAK" if abs(prediction) > 0.005 else "NEUTRAL"
-            
-            print(f"{symbol:>6}: {direction} {strength} | Prediction: {prediction:+.6f} | Confidence: {confidence}")
+    files_exist = sum(1 for f in essential_files if f.exists())
+    if files_exist >= len(essential_files) * 0.5:  # At least 50% exist
+        health_checks['data_files'] = True
+        print(f"✅ Data files ({files_exist}/{len(essential_files)})")
     else:
-        print("No predictions generated")
-    
-    # Display alerts
-    alerts = results.get('alerts', [])
-    if alerts:
-        print(f"\n🚨 ALERTS TRIGGERED ({len(alerts)}):")
-        print("-" * 40)
-        for alert in alerts:
-            print(f"• {alert['type']}: {alert['message']}")
-    else:
-        print("\n✅ No alerts triggered")
-    
-    # Display portfolio impact
-    portfolio = results.get('portfolio_impact', {})
-    if portfolio:
-        print(f"\n💼 PORTFOLIO IMPACT:")
-        print("-" * 30)
-        print(f"Total Exposure: {portfolio.get('total_exposure', 0):.1%}")
-        print(f"Risk Level: {portfolio.get('risk_level', 'UNKNOWN')}")
-        
-        recommendations = portfolio.get('recommendations', {})
-        if recommendations:
-            print("\n🎯 POSITION RECOMMENDATIONS:")
-            for symbol, rec in recommendations.items():
-                direction = rec['direction']
-                size = rec['position_size']
-                pred = rec['prediction']
-                print(f"  {symbol}: {direction} {size:.1%} (pred: {pred:+.6f})")
-    
-    # Performance metrics
-    metrics = results.get('performance_metrics', {})
-    if metrics:
-        print(f"\n⚡ PERFORMANCE METRICS:")
-        print("-" * 30)
-        print(f"Cycle Time: {metrics.get('cycle_time_seconds', 0):.2f}s")
-        print(f"Success Rate: {metrics.get('success_rate', 0):.1%}")
-        print(f"Symbols Processed: {metrics.get('symbols_processed', 0)}")
-        print(f"Predictions Generated: {metrics.get('predictions_generated', 0)}")
-    
-    # Save results
-    results_file = engine.save_realtime_results(results)
-    if results_file:
-        print(f"\n💾 Results saved: {results_file}")
-    
-    return True
-
-async def run_continuous_monitoring():
-    """Run continuous monitoring mode"""
-    print("\n🔄 Phase 2: Continuous Monitoring Mode")
-    print("-" * 50)
-    
-    # Get user preferences
-    try:
-        interval = int(input("Enter monitoring interval in minutes (default 15): ") or "15")
-        max_cycles = int(input("Enter maximum cycles (default 24 for 6 hours): ") or "24")
-    except ValueError:
-        interval = 15
-        max_cycles = 24
-    
-    print(f"\n🎯 Starting continuous monitoring:")
-    print(f"   • Interval: {interval} minutes")
-    print(f"   • Max cycles: {max_cycles}")
-    print(f"   • Estimated duration: {(interval * max_cycles) / 60:.1f} hours")
-    print(f"   • Press Ctrl+C to stop early")
-    
-    # Initialize prediction engine
-    engine = RealTimePredictionEngine()
-    
-    if not engine.load_production_models():
-        print("❌ Failed to load models for continuous monitoring!")
-        return False
-    
-    # Initialize drift detector
-    drift_detector = ModelDriftDetector(engine.config)
-    
-    print(f"\n🚀 Monitoring started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 70)
-    
-    try:
-        await engine.continuous_monitoring(interval_minutes=interval, max_cycles=max_cycles)
-    except KeyboardInterrupt:
-        print("\n⏹️ Monitoring stopped by user")
-    
-    return True
-
-def run_model_performance_check():
-    """Check model performance and drift"""
-    print("\n📊 Phase 3: Model Performance Analysis")
-    print("-" * 50)
-    
-    config = Config()
-    
-    # Load risk analysis from Day 11
-    risk_file = config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"
-    if risk_file.exists():
-        import pandas as pd
-        risk_df = pd.read_csv(risk_file)
-        
-        print("🏆 MODEL PERFORMANCE SUMMARY (from Day 11):")
-        print("=" * 60)
-        
-        # Display top models
-        top_models = risk_df.nlargest(3, 'Sharpe_Ratio')
-        for i, (_, model) in enumerate(top_models.iterrows(), 1):
-            print(f"{i}. {model['Model']}")
-            print(f"   Sharpe Ratio: {model['Sharpe_Ratio']:.4f}")
-            print(f"   Annual Return: {model['Annual_Return']*100:.2f}%")
-            print(f"   Max Drawdown: {model['Max_Drawdown']:.4f}")
-            print(f"   Win Rate: {model['Win_Rate']:.1f}%")
-            print()
-    else:
-        print("⚠️ No risk analysis found from Day 11")
+        print(f"⚠️ Data files ({files_exist}/{len(essential_files)})")
     
     # Check model files
     models_dir = config.PROJECT_ROOT / "models"
-    ensemble_dir = models_dir / "ensemble"
-    
-    print("📦 AVAILABLE MODELS:")
-    print("-" * 30)
-    
-    model_files = [
-        ("Best Ensemble", ensemble_dir / "simple_average_ensemble.joblib"),
-        ("Voting Ensemble", ensemble_dir / "voting_regressor_ensemble.joblib"),
-        ("Stacked Ensemble", ensemble_dir / "stacked_ensemble_ensemble.joblib"),
-        ("XGBoost", models_dir / "advanced" / "regression_xgboost_optimized.joblib"),
-        ("LightGBM", models_dir / "advanced" / "regression_lightgbm_optimized.joblib"),
-        ("Random Forest", models_dir / "regression_random_forest.joblib")
-    ]
-    
-    available_models = 0
-    for name, path in model_files:
-        if path.exists():
-            file_size = path.stat().st_size / 1024 / 1024  # MB
-            print(f"✅ {name}: {file_size:.1f} MB")
-            available_models += 1
+    if models_dir.exists():
+        model_files = list(models_dir.rglob("*.joblib"))
+        if len(model_files) >= 3:
+            health_checks['model_files'] = True
+            print(f"✅ Model files ({len(model_files)} found)")
         else:
-            print(f"❌ {name}: Not found")
+            print(f"⚠️ Model files ({len(model_files)} found)")
+    else:
+        print("❌ Model directory missing")
     
-    print(f"\nTotal available models: {available_models}/{len(model_files)}")
+    # Check directory structure
+    required_dirs = [config.DATA_PATH, config.LOGS_PATH, config.PROJECT_ROOT / "src"]
+    dirs_exist = sum(1 for d in required_dirs if d.exists())
+    if dirs_exist == len(required_dirs):
+        health_checks['directory_structure'] = True
+        print("✅ Directory structure")
+    else:
+        print(f"⚠️ Directory structure ({dirs_exist}/{len(required_dirs)})")
     
-    if available_models == 0:
-        print("⚠️ No models available for real-time prediction!")
-        return False
+    health_score = sum(health_checks.values()) / len(health_checks) * 100
+    status = "HEALTHY" if health_score >= 75 else "DEGRADED" if health_score >= 50 else "CRITICAL"
     
-    return True
+    print(f"\nSystem Health Score: {health_score:.0f}% ({status})")
+    return health_checks, health_score
 
-def display_menu():
-    """Display interactive menu"""
-    print("\n🎯 SELECT OPERATION MODE:")
-    print("=" * 40)
-    print("1. 🔄 Single Prediction Cycle (Test)")
-    print("2. 📡 Continuous Monitoring")
-    print("3. 📊 Model Performance Check")
-    print("4. 🚀 Production Demo (Quick)")
-    print("5. ❌ Exit")
-    print()
+def create_deployment_checklist():
+    """Create deployment readiness checklist"""
+    print("\nGenerating deployment checklist...")
+    
+    config = Config()
+    checklist = {
+        'data_pipeline': {
+            'feature_data': (config.FEATURES_DATA_PATH / "selected_features.csv").exists(),
+            'target_stocks': (config.PROCESSED_DATA_PATH / "target_stocks.txt").exists(),
+            'validation_results': (config.PROCESSED_DATA_PATH / "day10_validation_results.json").exists()
+        },
+        'models': {
+            'ensemble_models': (config.PROJECT_ROOT / "models" / "ensemble").exists(),
+            'baseline_models': (config.PROJECT_ROOT / "models").exists(),
+            'model_artifacts': len(list((config.PROJECT_ROOT / "models").rglob("*.joblib"))) >= 3
+        },
+        'applications': {
+            'dashboard': (config.PROJECT_ROOT / "src" / "streamlit_dashboard.py").exists(),
+            'api_server': (config.PROJECT_ROOT / "src" / "api_server.py").exists(),
+            'realtime_engine': (config.PROJECT_ROOT / "src" / "realtime_prediction.py").exists()
+        },
+        'infrastructure': {
+            'configuration': (config.PROJECT_ROOT / "src" / "config.py").exists(),
+            'logging': config.LOGS_PATH.exists(),
+            'documentation': (config.PROJECT_ROOT / "README.md").exists()
+        }
+    }
+    
+    print("\nDeployment Readiness Checklist:")
+    print("=" * 35)
+    
+    total_checks = 0
+    passed_checks = 0
+    
+    for category, checks in checklist.items():
+        print(f"\n{category.title()}:")
+        for check_name, status in checks.items():
+            icon = "✅" if status else "❌"
+            print(f"  {icon} {check_name.replace('_', ' ').title()}")
+            total_checks += 1
+            if status:
+                passed_checks += 1
+    
+    readiness_score = (passed_checks / total_checks) * 100
+    deployment_status = "READY" if readiness_score >= 80 else "NEEDS_WORK" if readiness_score >= 60 else "NOT_READY"
+    
+    print(f"\nDeployment Readiness: {readiness_score:.0f}% ({deployment_status})")
+    
+    return checklist, readiness_score
 
-async def run_production_demo():
-    """Run a quick production demonstration"""
-    print("\n🚀 Phase 4: Production Demo")
-    print("-" * 50)
+def generate_final_report(test_report: dict, optimization_results: dict, health_checks: dict, deployment_checklist: dict):
+    """Generate comprehensive final report"""
+    config = Config()
     
-    engine = RealTimePredictionEngine()
+    final_report = {
+        'day_15_summary': {
+            'completion_date': datetime.now().isoformat(),
+            'test_success_rate': test_report['test_summary']['success_rate'],
+            'system_status': test_report['system_status'],
+            'health_score': sum(health_checks.values()) / len(health_checks) * 100,
+            'deployment_readiness': sum(1 for category in deployment_checklist.values() 
+                                      for status in category.values() if status) / 
+                                   sum(len(category) for category in deployment_checklist.values()) * 100
+        },
+        'integration_testing': test_report,
+        'system_optimization': optimization_results,
+        'health_validation': health_checks,
+        'deployment_checklist': deployment_checklist,
+        'next_steps': [
+            "Deploy to production environment",
+            "Set up monitoring and alerting",
+            "Configure automated backups",
+            "Implement continuous integration",
+            "Schedule model retraining"
+        ]
+    }
     
-    print("📦 Loading models...")
-    if not engine.load_production_models():
-        print("❌ Model loading failed!")
-        return False
+    # Save final report
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = config.PROCESSED_DATA_PATH / f"day15_final_report_{timestamp}.json"
     
-    print("🎯 Running 3 quick prediction cycles...")
+    with open(report_path, 'w') as f:
+        json.dump(final_report, f, indent=2, default=str)
     
-    for i in range(3):
-        print(f"\n--- Cycle {i+1}/3 ---")
-        results = await engine.run_realtime_cycle()
-        
-        predictions = results.get('predictions', {})
-        alerts = results.get('alerts', [])
-        cycle_time = results.get('performance_metrics', {}).get('cycle_time_seconds', 0)
-        
-        print(f"⚡ Completed in {cycle_time:.1f}s")
-        print(f"📈 Predictions: {len(predictions)} stocks")
-        print(f"🚨 Alerts: {len(alerts)}")
-        
-        # Show strongest prediction
-        if predictions:
-            best_symbol = max(predictions.keys(), 
-                            key=lambda s: abs(predictions[s].get('primary', {}).get('prediction', 0)))
-            best_pred = predictions[best_symbol].get('primary', {}).get('prediction', 0)
-            direction = "BUY 📈" if best_pred > 0 else "SELL 📉"
-            print(f"🎯 Strongest signal: {best_symbol} {direction} ({best_pred:+.6f})")
-        
-        if i < 2:  # Don't wait after last cycle
-            print("⏳ Waiting 10 seconds...")
-            await asyncio.sleep(10)
-    
-    print("\n✅ Production demo completed!")
-    return True
+    return final_report, str(report_path)
 
 async def main():
-    """Main execution function for Day 12"""
+    """Main execution function for Day 15"""
     
     display_banner()
     
-    # Check prerequisites
-    if not check_prerequisites():
-        return
-    
-    # Run model performance check first
-    if not run_model_performance_check():
-        print("❌ Model performance check failed!")
-        return
-    
-    # Interactive menu
-    while True:
-        display_menu()
+    try:
+        # Phase 1: System Health Check
+        print("\nPhase 1: System Health Validation")
+        print("-" * 40)
+        health_checks, health_score = validate_system_health()
         
-        try:
-            choice = input("Enter your choice (1-5): ").strip()
-            
-            if choice == "1":
-                success = await run_single_prediction_cycle()
-                if success:
-                    print("\n✅ Single prediction cycle completed successfully!")
-                else:
-                    print("\n❌ Single prediction cycle failed!")
-                    
-            elif choice == "2":
-                success = await run_continuous_monitoring()
-                if success:
-                    print("\n✅ Continuous monitoring completed!")
-                    
-            elif choice == "3":
-                run_model_performance_check()
-                
-            elif choice == "4":
-                success = await run_production_demo()
-                if success:
-                    print("\n✅ Production demo completed!")
-                    
-            elif choice == "5":
-                print("\n👋 Exiting Day 12 Real-Time System...")
-                break
-                
-            else:
-                print("❌ Invalid choice. Please enter 1-5.")
-                
-        except KeyboardInterrupt:
-            print("\n\n⏹️ Operation interrupted by user.")
-            break
-        except Exception as e:
-            print(f"\n❌ Error: {e}")
-    
-    # Final summary
-    print("\n🎯 Day 12 Completed Successfully!")
-    print("=" * 70)
-    print("✅ Real-time prediction system implemented")
-    print("✅ Model serving infrastructure created")
-    print("✅ Alert system for significant predictions")
-    print("✅ Performance monitoring dashboard")
-    print("✅ Model drift detection framework")
-    print("✅ Portfolio impact analysis")
-    print("✅ Production-ready architecture")
-    
-    print(f"\n📊 System Capabilities:")
-    print(f"   🔄 Real-time data fetching with yfinance")
-    print(f"   🧠 73-feature engineering pipeline")
-    print(f"   🎯 Ensemble model predictions (4.25 Sharpe)")
-    print(f"   🚨 Automated alert system")
-    print(f"   💼 Portfolio optimization integration")
-    print(f"   📈 Performance monitoring")
-    print(f"   ⚡ <3 second prediction cycles")
-    
-    print("\n📋 Ready for Day 13:")
-    print("1. FastAPI REST API development")
-    print("2. Authentication and security")
-    print("3. API documentation with Swagger")
-    print("4. Load testing and performance optimization")
+        # Phase 2: Integration Testing
+        print("\nPhase 2: Comprehensive Integration Testing")
+        print("-" * 45)
+        test_report = await run_integration_tests()
+        
+        # Phase 3: System Optimization
+        print("\nPhase 3: System Optimization")
+        print("-" * 35)
+        optimization_results = run_system_optimization()
+        
+        # Phase 4: Deployment Readiness
+        print("\nPhase 4: Deployment Readiness Assessment")
+        print("-" * 45)
+        deployment_checklist, readiness_score = create_deployment_checklist()
+        
+        # Phase 5: Final Report
+        print("\nPhase 5: Final Report Generation")
+        print("-" * 35)
+        final_report, report_path = generate_final_report(
+            test_report, optimization_results, health_checks, deployment_checklist
+        )
+        
+        # Display final summary
+        print("\nDay 15 Integration & Testing Complete!")
+        print("=" * 45)
+        
+        summary = final_report['day_15_summary']
+        print(f"Test Success Rate: {summary['test_success_rate']:.1f}%")
+        print(f"System Health: {summary['health_score']:.0f}%")
+        print(f"Deployment Readiness: {summary['deployment_readiness']:.0f}%")
+        print(f"Overall Status: {summary['system_status']}")
+        
+        print(f"\nFinal Report: {report_path}")
+        
+        # Recommendations
+        if test_report.get('recommendations'):
+            print("\nCritical Recommendations:")
+            for i, rec in enumerate(test_report['recommendations'][:3], 1):
+                print(f"{i}. {rec}")
+        
+        # Next steps
+        print(f"\nNext Steps for Day 16:")
+        for step in final_report['next_steps'][:3]:
+            print(f"• {step}")
+        
+        print("\nSystem ready for Day 16: Final Deployment & Documentation")
+        
+    except KeyboardInterrupt:
+        print("\nOperation interrupted by user")
+    except Exception as e:
+        print(f"Day 15 execution error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
