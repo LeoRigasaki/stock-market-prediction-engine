@@ -134,6 +134,32 @@ A comprehensive, production-ready machine learning system designed to predict st
 - Response caching for optimal performance
 - Health monitoring and error handling
 
+## 📊 Live Results & Interactive Visualizations
+
+### **🏆 Model Performance Analysis (4.25 Sharpe Ratio Achievement)**
+![Model Performance Dashboard](plots/day6_model_comparison.png)
+*Comprehensive comparison of 10+ ML models showing our ensemble achieving exceptional 4.25 Sharpe ratio*
+
+### **💼 Advanced Risk Management & Portfolio Optimization**
+![Risk Management Dashboard](plots/day11_risk_dashboard.png)
+*Professional risk analysis with VaR calculations, portfolio optimization, and Kelly Criterion position sizing*
+
+### **📈 Market Analysis & Pattern Recognition**
+![Market Analysis Dashboard](plots/day5_interactive_dashboard.png)
+*Statistical market analysis with regime detection, correlation analysis, and anomaly identification*
+
+### **🤖 Advanced ML Models & Hyperparameter Optimization**
+![Advanced Models Results](plots/day7_8_advanced_models.png)
+*XGBoost and LightGBM optimization results with Optuna hyperparameter tuning*
+
+### **🏛️ Ensemble Methods & Model Stacking**
+![Ensemble Analysis](plots/day9_ensemble_analysis.png)
+*Sophisticated model combination techniques achieving superior performance through ensemble methods*
+
+**🔗 Live Interactive Demos**: All visualizations are fully interactive with real-time data in our Docker deployment.
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
