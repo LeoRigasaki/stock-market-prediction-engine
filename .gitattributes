@@ -1,0 +1,6 @@
+# Fixing GitHub language detection for ML portfolio
+*.html linguist-vendored=true
+plots/* linguist-vendored=true
+*.ipynb linguist-documentation=true
+data/raw/* linguist-generated=true
+logs/* linguist-generated=true
