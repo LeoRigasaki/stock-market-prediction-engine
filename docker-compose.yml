@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # FastAPI ML Prediction API
+  stock-api:
+    build: .
+    container_name: stock-prediction-api
+    environment:
+      - SERVICE_TYPE=api
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./data/processed:/app/data/processed
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stock-network
+
+  # Streamlit Interactive Dashboard  
+  stock-dashboard:
+    build: .
+    container_name: stock-prediction-dashboard
+    environment:
+      - SERVICE_TYPE=dashboard
+      - PYTHONPATH=/app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./logs:/app/logs
+      - ./data/processed:/app/data/processed
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stock-network
+    depends_on:
+      - stock-api
+
+networks:
+  stock-network:
+    driver: bridge
+
+# Optional: Add volume for persistent data
+volumes:
+  stock-data:
+    driver: local

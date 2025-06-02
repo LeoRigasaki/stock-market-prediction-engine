@@ -44,3 +44,8 @@ loguru
 
 # Web Framework (for future dashboard)
 streamlit
+
+# API Server Dependencies
+fastapi
+uvicorn[standard]
+pydantic

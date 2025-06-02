@@ -1,0 +1,58 @@
+# Exclude heavy/unnecessary files from Docker build
+
+# Raw datasets (too large, not needed in production)
+data/raw/
+*.csv.gz
+*.zip
+
+# Development files
+.git/
+.gitignore
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs (will be mounted as volume)
+logs/*.log
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Documentation (not needed in container)
+README.md
+CHANGELOG.md
+PROJECT_PLAN.md
+
+# Backup files
+backups/
+
+# Large plot files (optional - only if very large)
+plots/*.png
+plots/*.jpg
+
+# Test files
+tests/
+
+# Environment files (sensitive)
+.env
+kaggle.json
