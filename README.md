@@ -281,7 +281,7 @@ This project is for educational and portfolio demonstration purposes.
 
 **⭐ Star this repository if you find it useful!**
 
-[![GitHub stars](https://img.shields.io/github/stars/LeoRigasaki/Stock-Engine?style=social)](https://github.com/LeoRigasaki/Stock-Engine)
+[![GitHub stars](https://img.shields.io/github/stars/LeoRigasaki/stock-market-prediction-engine?style=social)](https://github.com/LeoRigasaki/stock-market-prediction-engine)
 [![Docker Pulls](https://img.shields.io/docker/pulls/leorigasaki535/stock-prediction-dashboard)](https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard)
 
 **Built with fun for the data science and finance community**
