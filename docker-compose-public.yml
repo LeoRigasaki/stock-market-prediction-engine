@@ -1,0 +1,38 @@
+services:
+  # FastAPI ML Prediction API
+  stock-api:
+    image: leorigasaki535/stock-prediction-api:latest
+    container_name: stock-prediction-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stock-network
+
+  # Streamlit Interactive Dashboard  
+  stock-dashboard:
+    image: leorigasaki535/stock-prediction-dashboard:latest
+    container_name: stock-prediction-dashboard
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stock-network
+    depends_on:
+      - stock-api
+
+networks:
+  stock-network:
+    driver: bridge
