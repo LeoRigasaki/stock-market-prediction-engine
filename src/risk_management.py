@@ -480,7 +480,10 @@ class RiskManagementFramework:
             expected_returns.append(np.mean(stock_df[best_pred_col]))
         
         portfolio_return = np.dot(weights_array, expected_returns)
-        portfolio_volatility = np.sqrt(np.dot(weights_array, [stock_volatilities[stock] for stock in stocks_list]))
+
+        # Portfolio volatility assuming independence between stocks
+        vol_array = np.array([stock_volatilities[stock] for stock in stocks_list])
+        portfolio_volatility = np.sqrt(np.sum((weights_array * vol_array) ** 2))
         
         risk_parity_results = {
             'stocks': stocks_list,
