@@ -486,12 +486,19 @@ class MarketAnalyzer:
         
         # 4. PCA explained variance
         if not pca_df.empty:
-            # Sample explained variance ratios
-            n_components = min(8, pca_df.shape[1] - 2)  # -2 for Date and Ticker
-            sample_variance = np.array([0.3, 0.2, 0.15, 0.1, 0.08, 0.06, 0.05, 0.04])[:n_components]
+            component_cols = [
+                col for col in pca_df.columns
+                if col not in ['Date', 'Ticker'] and pd.api.types.is_numeric_dtype(pca_df[col])
+            ]
+            n_components = min(8, len(component_cols))
+            component_variance = pca_df[component_cols[:n_components]].var()
+            explained_variance = component_variance / component_variance.sum() if component_variance.sum() else component_variance
             fig.add_trace(
-                go.Bar(x=[f'PC{i+1}' for i in range(n_components)], 
-                      y=sample_variance, name='Explained Variance'),
+                go.Bar(
+                    x=[f'PC{i+1}' for i in range(n_components)],
+                    y=explained_variance.values,
+                    name='Explained Variance'
+                ),
                 row=2, col=1
             )
         

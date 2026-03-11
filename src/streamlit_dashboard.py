@@ -1,878 +1,1497 @@
 #!/usr/bin/env python3
 """
-Stock Market Prediction Engine - Day 14
-Interactive Streamlit Dashboard
+Stock Market Prediction Engine
+Dynamic Streamlit dashboard driven by real backend and saved model artifacts.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
 import asyncio
 import json
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
+import os
 import sys
-import warnings
-warnings.filterwarnings('ignore')
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import requests
+import streamlit as st
+from requests import RequestException
+
+# Ensure the project root is importable when Streamlit executes this file from src/.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import Config
 from src.realtime_prediction import RealTimePredictionEngine
 from src.risk_management import RiskManagementFramework
 
-# Page config
 st.set_page_config(
-    page_title="Stock Market AI Prediction Engine",
-    page_icon="📈",
+    page_title="Stock Market Prediction Engine",
+    page_icon=":chart_with_upwards_trend:",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        text-align: center;
-        background: linear-gradient(90deg, #1f77b4, #ff7f0e);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        margin: 0.5rem 0;
-    }
-    .prediction-positive {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
-    .prediction-negative {
-        background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
-    .stButton button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 20px;
-        padding: 0.5rem 2rem;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
+
+def inject_theme() -> None:
+    """Apply a distinct market-terminal visual system."""
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+        :root {
+            --bg: #06110f;
+            --bg-soft: rgba(11, 28, 24, 0.78);
+            --panel: rgba(8, 22, 19, 0.84);
+            --panel-border: rgba(112, 173, 147, 0.18);
+            --text: #edf8f4;
+            --muted: #98b6ab;
+            --line: rgba(120, 175, 152, 0.16);
+            --bull: #62f7a6;
+            --bear: #ff7a63;
+            --accent: #f4b56a;
+            --accent-soft: rgba(244, 181, 106, 0.14);
+            --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+        }
+
+        html, body, [class*="css"]  {
+            font-family: "IBM Plex Sans", sans-serif;
+        }
+
+        .stApp {
+            color: var(--text);
+            background:
+                radial-gradient(circle at 15% 18%, rgba(84, 247, 166, 0.12), transparent 28%),
+                radial-gradient(circle at 82% 0%, rgba(244, 181, 106, 0.14), transparent 24%),
+                linear-gradient(135deg, #03100e 0%, #081916 46%, #07130f 100%);
+            background-attachment: fixed;
+        }
+
+        .stApp::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mask-image: linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0.15));
+        }
+
+        [data-testid="stAppViewContainer"] > .main {
+            background: transparent;
+        }
+
+        [data-testid="stSidebar"] {
+            background:
+                linear-gradient(180deg, rgba(8, 20, 18, 0.96), rgba(4, 14, 12, 0.94));
+            border-right: 1px solid rgba(104, 157, 136, 0.16);
+        }
+
+        [data-testid="stSidebar"] * {
+            color: var(--text);
+        }
+
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+            max-width: 1360px;
+        }
+
+        h1, h2, h3 {
+            font-family: "Syne", sans-serif;
+            letter-spacing: -0.02em;
+        }
+
+        .hero-shell, .panel-shell {
+            border: 1px solid var(--panel-border);
+            background: linear-gradient(180deg, rgba(11, 29, 25, 0.9), rgba(5, 16, 14, 0.92));
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .hero-shell {
+            position: relative;
+            overflow: hidden;
+            border-radius: 28px;
+            padding: 1.8rem 1.8rem 1.5rem 1.8rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .hero-shell::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.06) 40%, transparent 60%);
+            transform: translateX(-100%);
+            animation: sweep 8s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes sweep {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(100%); }
+        }
+
+        .hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.78rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 0.8rem;
+        }
+
+        .hero-title {
+            font-size: clamp(2.3rem, 5vw, 4.3rem);
+            line-height: 0.94;
+            margin: 0;
+            max-width: 900px;
+        }
+
+        .hero-subtitle {
+            max-width: 760px;
+            color: var(--muted);
+            margin-top: 0.8rem;
+            font-size: 1rem;
+        }
+
+        .ticker-strip {
+            display: flex;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            margin-top: 1.2rem;
+        }
+
+        .ticker-chip, .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.55rem 0.78rem;
+            border-radius: 999px;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.78rem;
+            border: 1px solid rgba(130, 191, 165, 0.18);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .status-online { color: var(--bull); }
+        .status-offline { color: var(--bear); }
+
+        .metric-tile {
+            border-radius: 24px;
+            padding: 1.15rem 1.15rem 1rem 1.15rem;
+            background:
+                linear-gradient(180deg, rgba(13, 36, 31, 0.78), rgba(7, 18, 16, 0.94));
+            border: 1px solid rgba(128, 187, 161, 0.12);
+            min-height: 140px;
+        }
+
+        .metric-label {
+            font-family: "IBM Plex Mono", monospace;
+            text-transform: uppercase;
+            font-size: 0.74rem;
+            color: var(--muted);
+            letter-spacing: 0.12em;
+        }
+
+        .metric-value {
+            font-family: "Syne", sans-serif;
+            font-size: 2.2rem;
+            line-height: 1;
+            margin-top: 0.7rem;
+        }
+
+        .metric-meta {
+            color: var(--muted);
+            margin-top: 0.6rem;
+            font-size: 0.92rem;
+        }
+
+        .signal-card {
+            border-radius: 24px;
+            padding: 1rem 1rem 0.95rem 1rem;
+            border: 1px solid rgba(127, 189, 163, 0.16);
+            box-shadow: var(--shadow);
+            min-height: 220px;
+        }
+
+        .signal-long {
+            background: linear-gradient(180deg, rgba(13, 44, 33, 0.96), rgba(5, 20, 15, 0.98));
+        }
+
+        .signal-short {
+            background: linear-gradient(180deg, rgba(52, 21, 18, 0.96), rgba(20, 8, 8, 0.98));
+        }
+
+        .signal-neutral {
+            background: linear-gradient(180deg, rgba(30, 30, 24, 0.94), rgba(14, 14, 11, 0.98));
+        }
+
+        .signal-symbol {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.95rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+        }
+
+        .signal-direction {
+            font-family: "Syne", sans-serif;
+            font-size: 2rem;
+            margin-top: 0.5rem;
+        }
+
+        .signal-stat {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.86rem;
+            color: var(--muted);
+            margin-top: 0.45rem;
+        }
+
+        .panel-shell {
+            border-radius: 24px;
+            padding: 1rem 1rem 0.25rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .panel-title {
+            font-family: "IBM Plex Mono", monospace;
+            text-transform: uppercase;
+            font-size: 0.76rem;
+            letter-spacing: 0.14em;
+            color: var(--accent);
+            margin-bottom: 0.8rem;
+        }
+
+        .source-callout {
+            border-left: 3px solid var(--accent);
+            background: rgba(255, 255, 255, 0.035);
+            padding: 0.85rem 1rem;
+            border-radius: 0 18px 18px 0;
+            margin: 0.8rem 0 1rem 0;
+            color: var(--muted);
+        }
+
+        div[data-testid="stMetric"] {
+            border-radius: 18px;
+            border: 1px solid rgba(124, 182, 157, 0.14);
+            background: rgba(9, 24, 21, 0.72);
+            padding: 0.85rem 1rem;
+        }
+
+        div[data-testid="stMetricLabel"] {
+            color: var(--muted);
+        }
+
+        div[data-testid="stDataFrame"] {
+            border-radius: 18px;
+            overflow: hidden;
+            border: 1px solid rgba(124, 182, 157, 0.12);
+        }
+
+        .stButton button {
+            border-radius: 999px;
+            padding: 0.68rem 1.35rem;
+            border: 1px solid rgba(244, 181, 106, 0.28);
+            background: linear-gradient(135deg, rgba(244, 181, 106, 0.24), rgba(82, 246, 166, 0.12));
+            color: var(--text);
+            font-family: "IBM Plex Mono", monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .stSelectbox label, .stMultiSelect label, .stNumberInput label, .stCheckbox label {
+            color: var(--muted) !important;
+        }
+
+        .footer-note {
+            color: var(--muted);
+            font-family: "IBM Plex Mono", monospace;
+            text-transform: uppercase;
+            font-size: 0.74rem;
+            letter-spacing: 0.12em;
+            margin-top: 0.6rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def safe_float(value: Any) -> float:
+    """Convert values to float without propagating exceptions."""
+    try:
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return 0.0
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def percent_value(value: Any) -> float:
+    """Treat ratios and already-scaled percentages consistently."""
+    numeric = safe_float(value)
+    return numeric * 100 if abs(numeric) <= 1.5 else numeric
+
+
+def format_percent(value: Any, digits: int = 1) -> str:
+    """Format ratios or percentage-like values for UI display."""
+    return f"{percent_value(value):.{digits}f}%"
+
+
+def normalize_return_series(values: np.ndarray) -> np.ndarray:
+    """Normalize returns that may be stored either as ratios or percentages."""
+    if len(values) == 0:
+        return values
+
+    arr = np.asarray(values, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    if len(finite) == 0:
+        return np.zeros_like(arr)
+
+    scale = 100.0 if np.nanpercentile(np.abs(finite), 95) > 1.5 else 1.0
+    return arr / scale
+
+
+def strategy_curve_from_validation(validation_results: Dict[str, Any]) -> pd.DataFrame:
+    """Build a cumulative strategy curve from saved validation outputs."""
+    walk_forward = validation_results.get('walk_forward', {})
+    predictions = np.asarray(walk_forward.get('predictions', []), dtype=float)
+    actuals = normalize_return_series(np.asarray(walk_forward.get('actuals', []), dtype=float))
+    dates = pd.to_datetime(walk_forward.get('dates', []), errors='coerce')
+
+    length = min(len(predictions), len(actuals), len(dates))
+    if length == 0:
+        return pd.DataFrame()
+
+    curve_df = pd.DataFrame({
+        'Date': dates[:length],
+        'Prediction': predictions[:length],
+        'ActualReturn': actuals[:length],
+    }).replace([np.inf, -np.inf], np.nan).dropna()
+
+    if curve_df.empty:
+        return pd.DataFrame()
+
+    curve_df['StrategyReturn'] = np.where(
+        curve_df['Prediction'] >= 0,
+        curve_df['ActualReturn'],
+        -curve_df['ActualReturn'],
+    )
+
+    daily_curve = (
+        curve_df.groupby('Date', as_index=False)['StrategyReturn']
+        .mean()
+        .sort_values('Date')
+    )
+    daily_curve['StrategyReturn'] = daily_curve['StrategyReturn'].clip(-0.35, 0.35)
+
+    cumulative_log_returns = np.log1p(daily_curve['StrategyReturn']).cumsum()
+    daily_curve['StrategyValue'] = 100 * np.exp(cumulative_log_returns)
+    daily_curve = daily_curve.replace([np.inf, -np.inf], np.nan).dropna(subset=['StrategyValue'])
+
+    return daily_curve[['Date', 'StrategyValue']]
+
+
+def prediction_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Create a prediction table without assuming optional columns exist."""
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).drop(columns=['ModelBreakdown'], errors='ignore')
+
 
 class DashboardApp:
-    def __init__(self):
+    """Interactive dashboard driven by live API responses and saved artifacts."""
+
+    def __init__(self) -> None:
         self.config = Config()
-        self.prediction_engine = None
-        self.risk_framework = None
-        self._initialize_components()
-    
-    def _initialize_components(self):
-        """Initialize ML components"""
+        self.api_base_url = os.getenv("STOCK_ENGINE_API_URL", "http://127.0.0.1:8000").rstrip("/")
+        self.api_key = os.getenv("STOCK_ENGINE_API_KEY", "demo_key_12345")
+        self.prediction_engine: Optional[RealTimePredictionEngine] = None
+        self.risk_framework: Optional[RiskManagementFramework] = None
+        self._bootstrap_session_state()
+
+    def _bootstrap_session_state(self) -> None:
+        """Initialize Streamlit session storage."""
+        defaults = {
+            'latest_cycle': None,
+            'latest_cycle_symbols': [],
+            'latest_portfolio': None,
+            'latest_portfolio_request': {},
+        }
+
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+
+    def ensure_local_runtime(self) -> None:
+        """Lazy-load local runtime for offline fallback paths."""
+        if self.prediction_engine is None:
+            self.prediction_engine = RealTimePredictionEngine()
+            self.prediction_engine.load_production_models()
+
+        if self.risk_framework is None:
+            self.risk_framework = RiskManagementFramework()
+
+    def api_request(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[Dict[str, Any]] = None,
+        timeout: int = 45,
+        quiet: bool = False,
+    ) -> Optional[Any]:
+        """Perform authenticated API requests to the backend."""
         try:
-            if 'prediction_engine' not in st.session_state:
-                self.prediction_engine = RealTimePredictionEngine()
-                success = self.prediction_engine.load_production_models()
-                st.session_state.prediction_engine = self.prediction_engine
-                st.session_state.models_loaded = success
-            else:
-                self.prediction_engine = st.session_state.prediction_engine
-            
-            if 'risk_framework' not in st.session_state:
-                self.risk_framework = RiskManagementFramework()
-                st.session_state.risk_framework = self.risk_framework
-            else:
-                self.risk_framework = st.session_state.risk_framework
-                
-        except Exception as e:
-            st.error(f"❌ Failed to initialize components: {e}")
-    
-    def load_performance_data(self):
-        """Load model performance data"""
-        try:
+            response = requests.request(
+                method,
+                f"{self.api_base_url}{path}",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except RequestException as exc:
+            if not quiet:
+                st.warning(f"Backend request failed for `{path}`: {exc}")
+            return None
+
+    def backend_health(self) -> Dict[str, Any]:
+        """Fetch backend health with a quiet failure mode."""
+        return self.api_request("GET", "/health", timeout=5, quiet=True) or {}
+
+    def market_status(self) -> Dict[str, Any]:
+        """Fetch market status from the backend."""
+        return self.api_request("GET", "/market/status", timeout=5, quiet=True) or {}
+
+    def load_performance_data(self) -> pd.DataFrame:
+        """Load saved performance metrics from the API or artifact file."""
+        api_payload = self.api_request("GET", "/models/performance", timeout=10, quiet=True)
+        if api_payload and api_payload.get('models'):
+            df = pd.DataFrame(api_payload['models'])
+        else:
             risk_summary_path = self.config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"
-            if risk_summary_path.exists():
-                return pd.read_csv(risk_summary_path)
-            else:
-                # Create dummy data for demo
-                return pd.DataFrame({
-                    'Model': ['Ensemble_SimpleAverage', 'XGBoost', 'LightGBM', 'RandomForest'],
-                    'Sharpe_Ratio': [4.25, 3.82, 3.76, 3.45],
-                    'Annual_Return': [0.15, 0.12, 0.11, 0.10],
-                    'Max_Drawdown': [-0.08, -0.12, -0.10, -0.15],
-                    'Win_Rate': [65.2, 62.1, 61.8, 59.5]
-                })
-        except Exception as e:
-            st.error(f"Error loading performance data: {e}")
+            df = pd.read_csv(risk_summary_path) if risk_summary_path.exists() else pd.DataFrame()
+
+        if df.empty:
+            return df
+
+        normalized = df.copy()
+        normalized['Annual_Return_Pct'] = normalized['Annual_Return'].apply(percent_value)
+        normalized['Annual_Volatility_Pct'] = normalized['Annual_Volatility'].apply(percent_value)
+        normalized['Win_Rate_Pct'] = normalized['Win_Rate'].apply(percent_value)
+        if 'Benchmark_Annual_Return' in normalized.columns:
+            normalized['Benchmark_Annual_Return_Pct'] = normalized['Benchmark_Annual_Return'].apply(percent_value)
+        if 'Excess_Annual_Return' in normalized.columns:
+            normalized['Excess_Annual_Return_Pct'] = normalized['Excess_Annual_Return'].apply(percent_value)
+        if 'Max_Drawdown_Percent' in normalized.columns:
+            normalized['Drawdown_Pct'] = normalized['Max_Drawdown_Percent'].apply(percent_value)
+        else:
+            normalized['Drawdown_Pct'] = normalized['Max_Drawdown'].apply(percent_value)
+
+        return normalized.sort_values('Sharpe_Ratio', ascending=False).reset_index(drop=True)
+
+    def load_benchmark_data(self) -> pd.DataFrame:
+        """Load saved benchmark metrics from the API or artifact file."""
+        api_payload = self.api_request("GET", "/models/performance", timeout=10, quiet=True)
+        if api_payload and api_payload.get('benchmarks'):
+            df = pd.DataFrame(api_payload['benchmarks'])
+        else:
+            benchmark_path = self.config.PROCESSED_DATA_PATH / "day11_benchmark_summary.csv"
+            df = pd.read_csv(benchmark_path) if benchmark_path.exists() else pd.DataFrame()
+
+        if df.empty:
+            return df
+
+        normalized = df.copy()
+        normalized['Annual_Return_Pct'] = normalized['Annual_Return'].apply(percent_value)
+        normalized['Annual_Volatility_Pct'] = normalized['Annual_Volatility'].apply(percent_value)
+        normalized['Win_Rate_Pct'] = normalized['Win_Rate'].apply(percent_value)
+        if 'Benchmark_Annual_Return' in normalized.columns:
+            normalized['Benchmark_Annual_Return_Pct'] = normalized['Benchmark_Annual_Return'].apply(percent_value)
+        if 'Excess_Annual_Return' in normalized.columns:
+            normalized['Excess_Annual_Return_Pct'] = normalized['Excess_Annual_Return'].apply(percent_value)
+        if 'Max_Drawdown_Percent' in normalized.columns:
+            normalized['Drawdown_Pct'] = normalized['Max_Drawdown_Percent'].apply(percent_value)
+        else:
+            normalized['Drawdown_Pct'] = normalized['Max_Drawdown'].apply(percent_value)
+
+        return normalized.sort_values('Sharpe_Ratio', ascending=False).reset_index(drop=True)
+
+    def load_validation_results(self) -> Dict[str, Any]:
+        """Load saved validation outputs."""
+        path = self.config.PROCESSED_DATA_PATH / "day10_validation_results.json"
+        if not path.exists():
+            return {}
+
+        with open(path, 'r') as handle:
+            return json.load(handle)
+
+    def load_feature_importance(self) -> pd.DataFrame:
+        """Load saved feature importance outputs."""
+        path = self.config.PROCESSED_DATA_PATH / "feature_importance_analysis.csv"
+        if not path.exists():
             return pd.DataFrame()
-    
-    def get_target_stocks(self):
-        """Get target stocks"""
-        try:
-            stocks_path = self.config.PROCESSED_DATA_PATH / "target_stocks.txt"
-            if stocks_path.exists():
-                with open(stocks_path, 'r') as f:
-                    return [line.strip() for line in f.readlines()][:10]
-            else:
-                return ['AAPL', 'AMZN', 'NVDA', 'MSFT', 'AMD', 'GOOGL', 'TSLA', 'META', 'NFLX', 'CRM']
-        except:
-            return ['AAPL', 'AMZN', 'NVDA', 'MSFT', 'AMD']
-    
-    def render_header(self):
-        """Render main header"""
-        st.markdown('<h1 class="main-header">📈 Stock Market AI Prediction Engine</h1>', unsafe_allow_html=True)
-        st.markdown("---")
-        
-        # Status indicators
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            models_loaded = st.session_state.get('models_loaded', False)
-            status = "🟢 Online" if models_loaded else "🔴 Offline"
-            st.markdown(f"**System Status:** {status}")
-        
-        with col2:
-            model_count = len(self.prediction_engine.models) if self.prediction_engine else 0
-            st.markdown(f"**Models Loaded:** {model_count}")
-        
-        with col3:
-            st.markdown(f"**Last Update:** {datetime.now().strftime('%H:%M:%S')}")
-        
-        with col4:
-            if st.button("🔄 Refresh Data"):
-                st.rerun()
-    
-    def render_sidebar(self):
-        """Render sidebar navigation"""
-        st.sidebar.title("🎛️ Dashboard Controls")
-        
-        # Navigation
-        page = st.sidebar.selectbox(
-            "📋 Select Page",
-            ["🏠 Overview", "🔮 Live Predictions", "📊 Performance Analytics", 
-             "💼 Portfolio Optimizer", "🚨 Alert Center", "🤖 Model Insights"]
-        )
-        
-        st.sidebar.markdown("---")
-        
-        # Stock selection
-        available_stocks = self.get_target_stocks()
-        selected_stocks = st.sidebar.multiselect(
-            "📈 Select Stocks",
-            available_stocks,
-            default=available_stocks[:5]
-        )
-        
-        # Time horizon
-        time_horizon = st.sidebar.selectbox(
-            "⏰ Prediction Horizon",
-            ["1 Day", "5 Days", "10 Days"],
-            index=1
-        )
-        
-        # Risk tolerance
-        risk_tolerance = st.sidebar.selectbox(
-            "⚖️ Risk Tolerance",
-            ["Conservative", "Moderate", "Aggressive"],
-            index=1
-        )
-        
-        st.sidebar.markdown("---")
-        
-        # Quick stats
-        st.sidebar.markdown("### 📊 Quick Stats")
-        performance_data = self.load_performance_data()
-        if not performance_data.empty:
-            best_model = performance_data.loc[performance_data['Sharpe_Ratio'].idxmax()]
-            st.sidebar.metric("🏆 Best Sharpe", f"{best_model['Sharpe_Ratio']:.2f}")
-            st.sidebar.metric("📈 Best Return", f"{best_model['Annual_Return']*100:.1f}%")
-            st.sidebar.metric("📉 Max Drawdown", f"{best_model['Max_Drawdown']*100:.1f}%")
-        
-        return page, selected_stocks, time_horizon, risk_tolerance
-    
-    def render_overview_page(self, selected_stocks):
-        """Render overview page"""
-        st.header("🏠 System Overview")
-        
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        performance_data = self.load_performance_data()
-        if not performance_data.empty:
-            with col1:
-                best_sharpe = performance_data['Sharpe_Ratio'].max()
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>🏆 Best Sharpe Ratio</h3>
-                    <h2>{best_sharpe:.2f}</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                avg_return = performance_data['Annual_Return'].mean() * 100
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>📈 Avg Annual Return</h3>
-                    <h2>{avg_return:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                best_win_rate = performance_data['Win_Rate'].max()
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>🎯 Best Win Rate</h3>
-                    <h2>{best_win_rate:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                models_count = len(performance_data)
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>🤖 Models Available</h3>
-                    <h2>{models_count}</h2>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        # Model performance chart
-        st.subheader("📊 Model Performance Comparison")
-        if not performance_data.empty:
-            fig = go.Figure()
-            
-            fig.add_trace(go.Bar(
-                x=performance_data['Model'],
-                y=performance_data['Sharpe_Ratio'],
-                name='Sharpe Ratio',
-                marker_color='rgb(55, 126, 184)'
-            ))
-            
-            fig.update_layout(
-                title="Model Performance (Sharpe Ratio)",
-                xaxis_title="Model",
-                yaxis_title="Sharpe Ratio",
-                template="plotly_white",
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Market overview
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🌐 Market Status")
-            now = datetime.now()
-            market_open = 9 <= now.hour <= 16 and now.weekday() < 5
-            status = "🟢 Open" if market_open else "🔴 Closed"
-            st.markdown(f"**Market Status:** {status}")
-            st.markdown(f"**Current Time:** {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            st.markdown(f"**Selected Stocks:** {', '.join(selected_stocks[:5])}")
-        
-        with col2:
-            st.subheader("📈 Portfolio Value")
-            # Simulate portfolio value
-            dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-            portfolio_values = 100000 * (1 + np.cumsum(np.random.normal(0.001, 0.02, 30)))
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=portfolio_values,
-                mode='lines',
-                name='Portfolio Value',
-                line=dict(color='green', width=3)
-            ))
-            
-            fig.update_layout(
-                title="30-Day Portfolio Performance",
-                xaxis_title="Date",
-                yaxis_title="Portfolio Value ($)",
-                template="plotly_white",
-                height=300
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
-    async def run_predictions(self, selected_stocks):
-        """Run predictions for selected stocks"""
-        if not self.prediction_engine or not st.session_state.get('models_loaded', False):
-            st.error("❌ Prediction engine not available")
+
+        df = pd.read_csv(path)
+        return df.sort_values(['model', 'importance'], ascending=[True, False]).reset_index(drop=True)
+
+    def load_risk_analysis(self) -> Dict[str, Any]:
+        """Load saved risk analysis artifacts."""
+        path = self.config.PROCESSED_DATA_PATH / "day11_risk_analysis.json"
+        if not path.exists():
             return {}
-        
-        try:
-            # Override target stocks temporarily
-            original_method = self.prediction_engine.get_target_stocks
-            self.prediction_engine.get_target_stocks = lambda: selected_stocks
-            
-            # Run prediction cycle
-            results = await self.prediction_engine.run_realtime_cycle()
-            
-            # Restore original method
-            self.prediction_engine.get_target_stocks = original_method
-            
-            return results
-        except Exception as e:
-            st.error(f"❌ Prediction failed: {e}")
-            return {}
-    
-    def render_predictions_page(self, selected_stocks):
-        """Render live predictions page"""
-        st.header("🔮 Live Predictions")
-        
-        # Control panel
-        col1, col2, col3 = st.columns([2, 1, 1])
-        
-        with col1:
-            st.markdown(f"**Analyzing:** {', '.join(selected_stocks)}")
-        
-        with col2:
-            auto_refresh = st.checkbox("🔄 Auto Refresh (30s)")
-        
-        with col3:
-            if st.button("🚀 Generate Predictions"):
-                st.session_state.trigger_prediction = True
-        
-        # Auto-refresh logic
-        if auto_refresh:
-            time.sleep(30)
-            st.rerun()
-        
-        # Generate predictions
-        if st.session_state.get('trigger_prediction', False) or auto_refresh:
-            with st.spinner("🔮 Generating AI predictions..."):
-                # Simulate predictions for demo (replace with real predictions)
-                predictions = {}
-                for symbol in selected_stocks:
-                    pred_value = np.random.normal(0, 0.01)  # Random prediction for demo
-                    confidence = "high" if abs(pred_value) > 0.005 else "medium"
-                    direction = "BUY" if pred_value > 0.001 else "SELL" if pred_value < -0.001 else "HOLD"
-                    
-                    predictions[symbol] = {
-                        'primary': {
-                            'prediction': pred_value,
-                            'confidence': confidence
-                        },
-                        'direction': direction,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                
-                st.session_state.predictions = predictions
-                st.session_state.trigger_prediction = False
-        
-        # Display predictions
-        if 'predictions' in st.session_state:
-            predictions = st.session_state.predictions
-            
-            # Prediction cards
-            cols = st.columns(min(len(predictions), 3))
-            for i, (symbol, pred_data) in enumerate(predictions.items()):
-                with cols[i % 3]:
-                    pred_value = pred_data['primary']['prediction']
-                    direction = pred_data['direction']
-                    confidence = pred_data['primary']['confidence']
-                    
-                    card_class = "prediction-positive" if pred_value > 0 else "prediction-negative"
-                    
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <h3>{symbol}</h3>
-                        <h2>{direction}</h2>
-                        <p>Prediction: {pred_value:+.4f}</p>
-                        <p>Confidence: {confidence.upper()}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # Detailed prediction table
-            st.subheader("📋 Detailed Predictions")
-            pred_df = pd.DataFrame([
-                {
-                    'Symbol': symbol,
-                    'Prediction': data['primary']['prediction'],
-                    'Direction': data['direction'],
-                    'Confidence': data['primary']['confidence'],
-                    'Timestamp': data['timestamp']
-                }
-                for symbol, data in predictions.items()
-            ])
-            
-            st.dataframe(pred_df, use_container_width=True)
-            
-            # Prediction visualization
-            fig = go.Figure()
-            
-            fig.add_trace(go.Bar(
-                x=list(predictions.keys()),
-                y=[data['primary']['prediction'] for data in predictions.values()],
-                marker_color=['green' if p > 0 else 'red' for p in [data['primary']['prediction'] for data in predictions.values()]],
-                name='Predictions'
-            ))
-            
-            fig.update_layout(
-                title="Stock Predictions Comparison",
-                xaxis_title="Stock Symbol",
-                yaxis_title="Prediction Value",
-                template="plotly_white",
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
-    def render_performance_page(self):
-        """Render performance analytics page"""
-        st.header("📊 Performance Analytics")
-        
-        performance_data = self.load_performance_data()
-        if performance_data.empty:
-            st.warning("No performance data available")
-            return
-        
-        # Performance metrics
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🏆 Model Rankings")
-            
-            # Sort by Sharpe ratio
-            sorted_data = performance_data.sort_values('Sharpe_Ratio', ascending=False)
-            
-            for i, (_, row) in enumerate(sorted_data.iterrows(), 1):
-                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-                st.markdown(f"""
-                **{medal} {row['Model']}**
-                - Sharpe: {row['Sharpe_Ratio']:.2f}
-                - Return: {row['Annual_Return']*100:.1f}%
-                - Win Rate: {row['Win_Rate']:.1f}%
-                """)
-        
-        with col2:
-            st.subheader("📈 Risk-Return Analysis")
-            
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatter(
-                x=performance_data['Max_Drawdown'].abs() * 100,
-                y=performance_data['Annual_Return'] * 100,
-                mode='markers+text',
-                text=performance_data['Model'],
-                textposition="top center",
-                marker=dict(
-                    size=performance_data['Sharpe_Ratio'] * 10,
-                    color=performance_data['Sharpe_Ratio'],
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title="Sharpe Ratio")
-                ),
-                name='Models'
-            ))
-            
-            fig.update_layout(
-                title="Risk vs Return (Bubble size = Sharpe Ratio)",
-                xaxis_title="Max Drawdown (%)",
-                yaxis_title="Annual Return (%)",
-                template="plotly_white",
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Historical performance simulation
-        st.subheader("📊 Historical Performance Simulation")
-        
-        # Create time series data
-        dates = pd.date_range(start='2023-01-01', end=datetime.now(), freq='D')
-        
-        fig = go.Figure()
-        
-        for _, row in performance_data.head(3).iterrows():  # Top 3 models
-            # Simulate cumulative returns
-            daily_return = row['Annual_Return'] / 252
-            daily_vol = daily_return * 2  # Simplified volatility
-            returns = np.random.normal(daily_return, daily_vol, len(dates))
-            cumulative = np.cumprod(1 + returns) * 100000  # $100k initial
-            
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=cumulative,
-                mode='lines',
-                name=row['Model'],
-                line=dict(width=2)
-            ))
-        
-        fig.update_layout(
-            title="Simulated Portfolio Performance ($100k initial)",
-            xaxis_title="Date",
-            yaxis_title="Portfolio Value ($)",
-            template="plotly_white",
-            height=500
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    def render_portfolio_page(self, selected_stocks, risk_tolerance):
-        """Render portfolio optimizer page"""
-        st.header("💼 Portfolio Optimizer")
-        
-        # Input panel
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            portfolio_value = st.number_input("💰 Portfolio Value ($)", min_value=1000, value=100000, step=1000)
-        
-        with col2:
-            optimization_method = st.selectbox("🎯 Optimization Method", ["Markowitz", "Risk Parity", "Equal Weight"])
-        
-        with col3:
-            target_return = st.number_input("📈 Target Return (%)", min_value=0.0, max_value=50.0, value=10.0, step=0.5) / 100
-        
-        if st.button("🚀 Optimize Portfolio"):
-            with st.spinner("🔄 Optimizing portfolio..."):
-                # Simulate portfolio optimization
-                n_stocks = len(selected_stocks)
-                
-                if optimization_method == "Equal Weight":
-                    weights = [1/n_stocks] * n_stocks
-                elif optimization_method == "Risk Parity":
-                    # Simulate risk parity weights
-                    base_weights = np.random.dirichlet(np.ones(n_stocks))
-                    weights = base_weights / base_weights.sum()
-                else:  # Markowitz
-                    # Simulate Markowitz optimization
-                    weights = np.random.dirichlet(np.ones(n_stocks))
-                
-                # Calculate metrics
-                expected_return = target_return + np.random.normal(0, 0.02)
-                volatility = 0.15 + np.random.normal(0, 0.03)
-                sharpe_ratio = expected_return / volatility if volatility > 0 else 0
-                
-                # Display results
-                st.success("✅ Portfolio optimization completed!")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("📈 Expected Return", f"{expected_return*100:.1f}%")
-                
-                with col2:
-                    st.metric("📊 Volatility", f"{volatility*100:.1f}%")
-                
-                with col3:
-                    st.metric("🏆 Sharpe Ratio", f"{sharpe_ratio:.2f}")
-                
-                # Portfolio allocation chart
-                fig = go.Figure(data=[go.Pie(
-                    labels=selected_stocks,
-                    values=weights,
-                    hole=0.4
-                )])
-                
-                fig.update_layout(
-                    title="Optimized Portfolio Allocation",
-                    height=400
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Allocation table
-                allocation_df = pd.DataFrame({
-                    'Stock': selected_stocks,
-                    'Weight (%)': [w*100 for w in weights],
-                    'Value ($)': [w*portfolio_value for w in weights]
-                })
-                
-                st.dataframe(allocation_df, use_container_width=True)
-    
-    def render_alerts_page(self):
-        """Render alert center page"""
-        st.header("🚨 Alert Center")
-        
-        # Alert configuration
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("⚙️ Alert Settings")
-            
-            high_conf_threshold = st.slider("🎯 High Confidence Threshold", 0.001, 0.05, 0.01, 0.001)
-            risk_threshold = st.slider("⚠️ Risk Limit Threshold", 0.02, 0.10, 0.05, 0.01)
-            
-            enable_email = st.checkbox("📧 Email Alerts")
-            enable_push = st.checkbox("📱 Push Notifications")
-        
-        with col2:
-            st.subheader("📊 Alert Statistics")
-            
-            # Simulate alert stats
-            st.metric("🚨 Alerts Today", "7")
-            st.metric("📈 High Confidence", "3")
-            st.metric("⚠️ Risk Warnings", "2")
-            st.metric("📊 Model Consensus", "2")
-        
-        # Recent alerts
-        st.subheader("📋 Recent Alerts")
-        
-        # Simulate recent alerts
-        alerts_data = [
-            {
-                'Time': '14:32:15',
-                'Type': 'High Confidence',
-                'Symbol': 'AAPL',
-                'Message': 'Strong BUY signal detected (+0.0156)',
-                'Severity': 'High'
-            },
-            {
-                'Time': '14:15:42',
-                'Type': 'Risk Warning',
-                'Symbol': 'NVDA',
-                'Message': 'Position exceeds risk limit (0.067)',
-                'Severity': 'Critical'
-            },
-            {
-                'Time': '13:58:23',
-                'Type': 'Model Consensus',
-                'Symbol': 'MSFT',
-                'Message': 'High model agreement on prediction',
-                'Severity': 'Medium'
-            }
+
+        with open(path, 'r') as handle:
+            return json.load(handle)
+
+    def load_retraining_triggers(self) -> List[Dict[str, Any]]:
+        """Load recorded retraining triggers if any exist."""
+        path = self.config.PROCESSED_DATA_PATH / "retraining_triggers.json"
+        if not path.exists():
+            return []
+
+        with open(path, 'r') as handle:
+            payload = json.load(handle)
+            return payload if isinstance(payload, list) else []
+
+    def get_target_stocks(self) -> List[str]:
+        """Load the stock universe from the processed artifact."""
+        stocks_path = self.config.PROCESSED_DATA_PATH / "target_stocks.txt"
+        if stocks_path.exists():
+            with open(stocks_path, 'r') as handle:
+                return [line.strip() for line in handle.readlines() if line.strip()][:10]
+
+        return ['AAPL', 'AMZN', 'NVDA', 'MSFT', 'AMD']
+
+    def build_file_audit(self) -> pd.DataFrame:
+        """Summarize live artifact availability and provenance."""
+        required = [
+            ("Performance Summary", self.config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"),
+            ("Benchmark Summary", self.config.PROCESSED_DATA_PATH / "day11_benchmark_summary.csv"),
+            ("Validation Results", self.config.PROCESSED_DATA_PATH / "day10_validation_results.json"),
+            ("Feature Importance", self.config.PROCESSED_DATA_PATH / "feature_importance_analysis.csv"),
+            ("Target Stocks", self.config.PROCESSED_DATA_PATH / "target_stocks.txt"),
+            ("Risk Analysis", self.config.PROCESSED_DATA_PATH / "day11_risk_analysis.json"),
         ]
-        
-        for alert in alerts_data:
-            severity_color = {"High": "🟡", "Critical": "🔴", "Medium": "🟢"}[alert['Severity']]
-            
-            st.markdown(f"""
-            <div style="border-left: 4px solid {'orange' if alert['Severity']=='High' else 'red' if alert['Severity']=='Critical' else 'green'}; 
-                        padding: 10px; margin: 10px 0; background: #f8f9fa;">
-                <strong>{severity_color} {alert['Type']} - {alert['Symbol']}</strong><br>
-                <em>{alert['Time']}</em><br>
-                {alert['Message']}
+
+        rows: List[Dict[str, Any]] = []
+        for label, path in required:
+            exists = path.exists()
+            rows.append({
+                'Artifact': label,
+                'Status': 'Live' if exists else 'Missing',
+                'Source': str(path.relative_to(self.config.PROJECT_ROOT)),
+                'Modified': datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S") if exists else "N/A"
+            })
+
+        rows.append({
+            'Artifact': 'Model Files',
+            'Status': 'Live',
+            'Source': 'models/**/*.joblib',
+            'Modified': str(len(list((self.config.PROJECT_ROOT / "models").rglob("*.joblib"))))
+        })
+
+        return pd.DataFrame(rows)
+
+    def run_local_cycle(self, symbols: List[str]) -> Dict[str, Any]:
+        """Fallback to local runtime if the backend is unavailable."""
+        self.ensure_local_runtime()
+
+        async def _execute() -> Dict[str, Any]:
+            original_method = self.prediction_engine.get_target_stocks
+            self.prediction_engine.get_target_stocks = lambda: symbols
+            try:
+                return await self.prediction_engine.run_realtime_cycle()
+            finally:
+                self.prediction_engine.get_target_stocks = original_method
+
+        return asyncio.run(_execute())
+
+    def run_prediction_cycle(self, symbols: List[str]) -> Dict[str, Any]:
+        """Run detailed predictions through the backend, with a local fallback."""
+        payload = {'symbols': symbols, 'include_confidence': True, 'include_alerts': True}
+        results = self.api_request("POST", "/predict/detailed", payload=payload, timeout=120, quiet=True)
+
+        if results:
+            results['_source'] = 'backend_api'
+            return results
+
+        fallback = self.run_local_cycle(symbols)
+        fallback['_source'] = 'local_runtime'
+        fallback['requested_symbols'] = symbols
+        fallback['models_loaded'] = len(self.prediction_engine.models) if self.prediction_engine else 0
+        return fallback
+
+    def run_portfolio_optimization(
+        self,
+        symbols: List[str],
+        optimization_method: str,
+        target_return: float,
+    ) -> Dict[str, Any]:
+        """Run portfolio optimization via backend or local fallback."""
+        if optimization_method == "equal_weight":
+            weights = np.array([1.0 / len(symbols)] * len(symbols))
+            return {
+                'weights': dict(zip(symbols, weights)),
+                'expected_return': 0.0,
+                'volatility': 0.0,
+                'sharpe_ratio': 0.0,
+                'optimization_method': 'equal_weight',
+                '_source': 'dashboard_equal_weight'
+            }
+
+        payload = {
+            'symbols': symbols,
+            'optimization_method': optimization_method,
+            'target_return': target_return,
+            'risk_tolerance': 'medium'
+        }
+        result = self.api_request("POST", "/portfolio/optimize", payload=payload, timeout=120, quiet=True)
+        if result:
+            result['_source'] = 'backend_api'
+            return result
+
+        self.ensure_local_runtime()
+        features_df = self.risk_framework.load_feature_data()
+        filtered = features_df[features_df['Ticker'].isin(symbols)].copy()
+        X, _, _ = self.risk_framework.prepare_portfolio_data(filtered)
+        predictions_df = self.risk_framework.generate_predictions(self.risk_framework.load_best_models(), X, filtered)
+
+        if optimization_method == "markowitz":
+            result = self.risk_framework.portfolio_optimization_markowitz(predictions_df, target_return=target_return)
+            if not result or not result.get('success', False):
+                result = self.risk_framework.risk_parity_portfolio(predictions_df)
+                result['optimization_method'] = 'markowitz_fallback_risk_parity'
+        else:
+            result = self.risk_framework.risk_parity_portfolio(predictions_df)
+
+        result['_source'] = 'local_runtime'
+        result['weights'] = dict(zip(result['stocks'], result['weights'])) if 'stocks' in result else {}
+        result['expected_return'] = result.get('expected_return', result.get('portfolio_return', 0))
+        result['volatility'] = result.get('volatility', result.get('portfolio_volatility', 0))
+        return result
+
+    def render_metric_tile(self, label: str, value: str, meta: str) -> None:
+        """Render a branded metric tile."""
+        st.markdown(
+            f"""
+            <div class="metric-tile">
+                <div class="metric-label">{label}</div>
+                <div class="metric-value">{value}</div>
+                <div class="metric-meta">{meta}</div>
             </div>
-            """, unsafe_allow_html=True)
-        
-        # Alert visualization
-        st.subheader("📊 Alert Frequency")
-        
-        # Simulate alert frequency data
-        alert_dates = pd.date_range(end=datetime.now(), periods=7, freq='D')
-        alert_counts = np.random.poisson(5, 7)
-        
+            """,
+            unsafe_allow_html=True,
+        )
+
+    def render_signal_card(self, row: Dict[str, Any]) -> None:
+        """Render a directional signal card."""
+        direction = row['Direction']
+        tone = "signal-neutral"
+        if direction == "BUY":
+            tone = "signal-long"
+        elif direction == "SELL":
+            tone = "signal-short"
+
+        st.markdown(
+            f"""
+            <div class="signal-card {tone}">
+                <div class="signal-symbol">{row['Symbol']}</div>
+                <div class="signal-direction">{direction}</div>
+                <div class="signal-stat">Signal {row['Prediction']:+.4f}</div>
+                <div class="signal-stat">Confidence band {row['Lower']:+.4f} to {row['Upper']:+.4f}</div>
+                <div class="signal-stat">Model agreement {row['ModelAgreement']:.2f}</div>
+                <div class="signal-stat">Models used {row['ModelsUsed']}</div>
+                <div class="signal-stat">Position bias {row['PositionDirection']}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    def render_hero(self, selected_stocks: List[str]) -> None:
+        """Render top-level dashboard branding and runtime state."""
+        health = self.backend_health()
+        market = self.market_status()
+        performance = self.load_performance_data()
+        best_model = performance.iloc[0] if not performance.empty else None
+
+        connection_state = "API Live" if health else "Local Fallback"
+        connection_class = "status-online" if health else "status-offline"
+        market_open = market.get('is_open', False)
+
+        ticker_markup = "".join(
+            f'<span class="ticker-chip">{symbol}</span>' for symbol in selected_stocks
+        )
+
+        subtitle = (
+            "Live signal generation, portfolio construction, drift surveillance, and saved validation "
+            "artifacts, presented as a single stock-engine control room."
+        )
+
+        best_model_text = best_model['Model'] if best_model is not None else "Awaiting artifacts"
+        sharpe_text = f"{best_model['Sharpe_Ratio']:.2f}" if best_model is not None else "N/A"
+        market_text = "Open" if market_open else "Closed"
+
+        st.markdown(
+            f"""
+            <section class="hero-shell">
+                <div class="hero-kicker">Live Quant Stack</div>
+                <h1 class="hero-title">Stock Market<br>Prediction Engine</h1>
+                <div class="hero-subtitle">{subtitle}</div>
+                <div class="ticker-strip">
+                    <span class="status-pill {connection_class}">{connection_state}</span>
+                    <span class="status-pill">{market_text}</span>
+                    <span class="status-pill">Top model {best_model_text}</span>
+                    <span class="status-pill">Net Sharpe {sharpe_text}</span>
+                </div>
+                <div class="ticker-strip">{ticker_markup}</div>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    def render_sidebar(self) -> Dict[str, Any]:
+        """Render dashboard controls."""
+        health = self.backend_health()
+        available_stocks = self.get_target_stocks()
+
+        with st.sidebar:
+            st.markdown("## Control Deck")
+            st.caption("Configure the live scan and portfolio construction path.")
+
+            page = st.selectbox(
+                "Workspace",
+                [
+                    "Overview",
+                    "Live Predictions",
+                    "Performance Analytics",
+                    "Portfolio Optimizer",
+                    "Alert Center",
+                    "Model Insights",
+                ],
+            )
+
+            selected_stocks = st.multiselect(
+                "Signal Universe",
+                available_stocks,
+                default=available_stocks[:4],
+            )
+
+            target_return = st.number_input(
+                "Target Return (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=12.0,
+                step=0.5,
+            ) / 100
+
+            optimization_mode = st.selectbox(
+                "Portfolio Mode",
+                ["markowitz", "risk_parity", "equal_weight"],
+                format_func=lambda item: item.replace("_", " ").title(),
+            )
+
+            st.markdown("---")
+            st.caption(f"Backend URL: `{self.api_base_url}`")
+            st.caption(f"Backend health: {'online' if health else 'offline'}")
+            st.caption("Frontend uses real API responses when available and local runtime only as fallback.")
+
+        return {
+            'page': page,
+            'selected_stocks': selected_stocks,
+            'target_return': target_return,
+            'optimization_mode': optimization_mode,
+        }
+
+    def render_overview_page(self, selected_stocks: List[str]) -> None:
+        """Render the overview command center."""
+        performance = self.load_performance_data()
+        benchmarks = self.load_benchmark_data()
+        validation = self.load_validation_results()
+        market = self.market_status()
+        audit_df = self.build_file_audit()
+        curve_df = strategy_curve_from_validation(validation)
+        feature_df = self.load_feature_importance()
+        latest_cycle = st.session_state.get('latest_cycle') or {}
+        latest_predictions = latest_cycle.get('predictions', {})
+
+        cols = st.columns(4)
+        with cols[0]:
+            if not performance.empty:
+                self.render_metric_tile("Best Net Sharpe", f"{performance.iloc[0]['Sharpe_Ratio']:.2f}", performance.iloc[0]['Model'])
+        with cols[1]:
+            best_win = performance['Win_Rate_Pct'].max() if not performance.empty else 0
+            best_win_model = (
+                performance.loc[performance['Win_Rate_Pct'].idxmax(), 'Model']
+                if not performance.empty else "No artifact"
+            )
+            self.render_metric_tile("Best Win Rate", f"{best_win:.1f}%", best_win_model)
+        with cols[2]:
+            stability = validation.get('stability', {}).get('stability_rating', 'N/A')
+            stability_score = validation.get('stability', {}).get('overall_stability_score', 0)
+            self.render_metric_tile("Stability", stability, f"Score {stability_score:.2f}")
+        with cols[3]:
+            session = market.get('trading_session', 'closed')
+            cycle_metrics = latest_cycle.get('performance_metrics', {})
+            cycle_meta = (
+                f"Last cycle {cycle_metrics.get('cycle_time_seconds', 0):.2f}s"
+                if cycle_metrics else "No live scan yet"
+            )
+            self.render_metric_tile("Market Session", session.title(), cycle_meta)
+
+        st.markdown(
+            f"""
+            <div class="source-callout">
+                Metrics below are sourced from live backend endpoints and saved artifacts. Performance tiles use a
+                {self.config.FORECAST_HORIZON_DAYS}-day forecast horizon and assume {self.config.DEFAULT_TRANSACTION_COST_BPS:.0f} bps
+                transaction cost per evaluation period.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if not performance.empty and not benchmarks.empty:
+            model_row = performance.iloc[0]
+            benchmark_row = benchmarks.iloc[0]
+            sharpe_edge = model_row['Sharpe_Ratio'] - benchmark_row['Sharpe_Ratio']
+            return_edge = model_row['Annual_Return_Pct'] - benchmark_row['Annual_Return_Pct']
+            st.markdown(
+                f"""
+                <div class="source-callout">
+                    Benchmark hurdle: top model <strong>{model_row['Model']}</strong> Sharpe {model_row['Sharpe_Ratio']:.2f}
+                    versus best naive benchmark <strong>{benchmark_row['Benchmark']}</strong> Sharpe {benchmark_row['Sharpe_Ratio']:.2f}.
+                    Current edge: {sharpe_edge:+.2f} Sharpe and {return_edge:+.1f}% annual return.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        left, right = st.columns([1.1, 0.9])
+        with left:
+            st.markdown('<div class="panel-title">Model Performance Engine</div>', unsafe_allow_html=True)
+            if not performance.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=performance['Model'],
+                    y=performance['Sharpe_Ratio'],
+                    marker_color=performance['Sharpe_Ratio'],
+                    marker_colorscale='Viridis',
+                    name='Sharpe Ratio',
+                ))
+                fig.update_layout(
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    height=400,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        with right:
+            st.markdown('<div class="panel-title">Artifact Provenance</div>', unsafe_allow_html=True)
+            st.dataframe(audit_df, use_container_width=True, hide_index=True)
+
+        left, right = st.columns(2)
+        with left:
+            st.markdown('<div class="panel-title">Walk-Forward Strategy Curve</div>', unsafe_allow_html=True)
+            if not curve_df.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=curve_df['Date'],
+                    y=curve_df['StrategyValue'],
+                    mode='lines',
+                    line=dict(color='#62f7a6', width=2.5),
+                    name='Strategy value',
+                ))
+                fig.update_layout(
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    height=360,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    yaxis=dict(type='log', title='Strategy Index'),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Validation curve unavailable.")
+
+        with right:
+            st.markdown('<div class="panel-title">Feature Drivers</div>', unsafe_allow_html=True)
+            if not feature_df.empty:
+                top_features = (
+                    feature_df.groupby('feature', as_index=False)['importance']
+                    .mean()
+                    .sort_values('importance', ascending=True)
+                    .tail(10)
+                )
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=top_features['importance'],
+                    y=top_features['feature'],
+                    orientation='h',
+                    marker_color='#f4b56a',
+                    name='Avg importance',
+                ))
+                fig.update_layout(
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    height=360,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Feature importance artifact unavailable.")
+
+        if latest_predictions:
+            st.markdown('<div class="panel-title">Latest Signal Snapshot</div>', unsafe_allow_html=True)
+            snapshot_rows = self.prediction_rows(latest_cycle)
+            preview_cols = st.columns(min(3, len(snapshot_rows)))
+            for index, row in enumerate(snapshot_rows[:3]):
+                with preview_cols[index]:
+                    self.render_signal_card(row)
+
+    def prediction_rows(self, cycle_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Flatten prediction results into dashboard-friendly rows."""
+        portfolio_impact = cycle_results.get('portfolio_impact', {}).get('recommendations', {})
+        rows: List[Dict[str, Any]] = []
+
+        for symbol, data in cycle_results.get('predictions', {}).items():
+            primary = data.get('primary', {})
+            prediction_value = safe_float(primary.get('prediction'))
+            interval = data.get('confidence_interval', {})
+            position = portfolio_impact.get(symbol, {})
+            rows.append({
+                'Symbol': symbol,
+                'Prediction': prediction_value,
+                'Direction': "BUY" if prediction_value > 0.001 else "SELL" if prediction_value < -0.001 else "HOLD",
+                'Confidence': primary.get('confidence', 'medium').upper(),
+                'Lower': safe_float(interval.get('lower', prediction_value)),
+                'Upper': safe_float(interval.get('upper', prediction_value)),
+                'ModelAgreement': safe_float(data.get('model_agreement')),
+                'ModelDispersion': safe_float(data.get('model_dispersion')),
+                'ModelsUsed': int(data.get('models_used', 1)),
+                'Timestamp': data.get('timestamp'),
+                'PositionDirection': position.get('direction', 'N/A'),
+                'PositionSize': safe_float(position.get('position_size')),
+                'ModelBreakdown': {
+                    key: safe_float(value)
+                    for key, value in data.items()
+                    if key not in {'primary', 'timestamp', 'symbol', 'confidence_interval', 'model_dispersion', 'model_agreement', 'models_used'}
+                    and isinstance(value, (int, float))
+                }
+            })
+
+        return sorted(rows, key=lambda item: abs(item['Prediction']), reverse=True)
+
+    def render_predictions_page(self, selected_stocks: List[str]) -> None:
+        """Render live prediction generation and inspection."""
+        st.markdown('<div class="panel-title">Real-Time Signal Deck</div>', unsafe_allow_html=True)
+
+        if not selected_stocks:
+            st.warning("Select at least one stock in the sidebar.")
+            return
+
+        refresh_cols = st.columns([1, 1, 4])
+        with refresh_cols[0]:
+            run_scan = st.button("Run Live Scan")
+        with refresh_cols[1]:
+            reuse_latest = st.button("Reuse Latest")
+
+        if run_scan:
+            with st.spinner("Scanning live market data and generating predictions..."):
+                st.session_state.latest_cycle = self.run_prediction_cycle(selected_stocks)
+                st.session_state.latest_cycle_symbols = selected_stocks
+        elif reuse_latest and st.session_state.get('latest_cycle_symbols') != selected_stocks:
+            st.info("Latest cycle was run for a different stock set. Run a fresh scan for these symbols.")
+
+        cycle = st.session_state.get('latest_cycle') or {}
+        if not cycle:
+            st.info("Run a live scan to generate signals.")
+            return
+
+        source = cycle.get('_source', 'unknown')
+        st.caption(f"Prediction source: `{source}`")
+
+        metrics = cycle.get('performance_metrics', {})
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("Cycle Time", f"{metrics.get('cycle_time_seconds', 0):.2f}s")
+        with cols[1]:
+            st.metric("Success Rate", format_percent(metrics.get('success_rate', 0)))
+        with cols[2]:
+            st.metric("Alerts Triggered", str(metrics.get('alerts_triggered', 0)))
+        with cols[3]:
+            st.metric("Retraining Triggers", str(metrics.get('retraining_triggers', 0)))
+
+        rows = self.prediction_rows(cycle)
+        cycle_errors = cycle.get('errors', [])
+        if cycle_errors:
+            st.warning("Live scan returned partial data for some symbols.")
+            st.code("\n".join(cycle_errors))
+
+        prediction_df = prediction_dataframe(rows)
+        if prediction_df.empty:
+            st.info("No predictions were generated for the selected symbols.")
+            return
+
+        card_cols = st.columns(min(3, len(rows)) or 1)
+        for index, row in enumerate(rows[:3]):
+            with card_cols[index]:
+                self.render_signal_card(row)
+
+        st.dataframe(prediction_df, use_container_width=True, hide_index=True)
+
         fig = go.Figure()
         fig.add_trace(go.Bar(
-            x=alert_dates,
-            y=alert_counts,
-            name='Daily Alerts',
-            marker_color='lightblue'
+            x=prediction_df['Symbol'],
+            y=prediction_df['Prediction'],
+            error_y=dict(
+                type='data',
+                symmetric=False,
+                array=prediction_df['Upper'] - prediction_df['Prediction'],
+                arrayminus=prediction_df['Prediction'] - prediction_df['Lower'],
+            ),
+            marker_color=[
+                '#62f7a6' if value > 0 else '#ff7a63' if value < 0 else '#f4b56a'
+                for value in prediction_df['Prediction']
+            ],
+            name='Primary signal',
         ))
-        
         fig.update_layout(
-            title="Alert Frequency (Last 7 Days)",
-            xaxis_title="Date",
-            yaxis_title="Number of Alerts",
-            template="plotly_white",
-            height=300
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=430,
+            margin=dict(l=20, r=20, t=20, b=20),
         )
-        
         st.plotly_chart(fig, use_container_width=True)
-    
-    def render_model_insights_page(self):
-        """Render model insights page"""
-        st.header("🤖 Model Insights")
-        
-        # Model explanation
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🧠 How Our AI Works")
-            
-            st.markdown("""
-            **Our ensemble model combines multiple AI techniques:**
-            
-            1. **🌳 XGBoost**: Gradient boosting for complex patterns
-            2. **⚡ LightGBM**: Fast, efficient tree-based learning
-            3. **🔗 Random Forest**: Ensemble of decision trees
-            4. **📊 Linear Models**: For baseline comparisons
-            
-            **The system uses 73 engineered features including:**
-            - 📈 Technical indicators (RSI, MACD, Bollinger Bands)
-            - 📊 Price momentum and volatility measures
-            - 📉 Rolling statistics and lag features
-            - ⏰ Time-based patterns
-            """)
-        
-        with col2:
-            st.subheader("📊 Feature Importance")
-            
-            # Simulate feature importance
-            features = ['bb_lower', 'ema_200', 'close_to_sma20', 'rsi', 'momentum_5d', 
-                       'atr_ratio', 'volume_ratio', 'volatility_20d', 'sma_50', 'stoch_k']
-            importance = [0.15, 0.12, 0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.05, 0.05]
-            
+
+        selected_symbol = st.selectbox("Model Breakdown", prediction_df['Symbol'])
+        symbol_row = next((row for row in rows if row['Symbol'] == selected_symbol), None)
+        if symbol_row and symbol_row['ModelBreakdown']:
+            breakdown = pd.DataFrame(
+                list(symbol_row['ModelBreakdown'].items()),
+                columns=['Model', 'Prediction']
+            ).sort_values('Prediction')
             fig = go.Figure()
             fig.add_trace(go.Bar(
-                y=features,
-                x=importance,
+                x=breakdown['Prediction'],
+                y=breakdown['Model'],
                 orientation='h',
-                marker_color='lightgreen'
+                marker_color='#f4b56a',
             ))
-            
             fig.update_layout(
-                title="Top 10 Most Important Features",
-                xaxis_title="Importance Score",
-                template="plotly_white",
-                height=400
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=360,
+                margin=dict(l=20, r=20, t=20, b=20),
             )
-            
             st.plotly_chart(fig, use_container_width=True)
-        
-        # Model architecture
-        st.subheader("🏗️ Architecture Overview")
-        
-        st.markdown("""
-        ```
-        📊 Data Input (OHLCV + Features)
-              ↓
-        🔧 Feature Engineering (73 features)
-              ↓
-        🤖 Ensemble Models
-              ├── XGBoost (Optimized)
-              ├── LightGBM (Optimized) 
-              ├── Random Forest
-              └── Neural Network
-              ↓
-        🎯 Prediction Aggregation
-              ↓
-        📈 Final Prediction + Confidence
-        ```
-        """)
-        
-        # Performance metrics explanation
-        st.subheader("📊 Understanding the Metrics")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            **📈 Sharpe Ratio**: Risk-adjusted returns
-            - Higher is better
-            - Our best: 4.25 (Excellent)
-            - Market average: ~1.0
-            
-            **💰 Annual Return**: Yearly profit percentage
-            - Our models: 10-15%
-            - S&P 500 average: ~10%
-            
-            **📉 Max Drawdown**: Largest loss from peak
-            - Lower is better
-            - Our models: 8-15%
-            - Acceptable: <20%
-            """)
-        
-        with col2:
-            st.markdown("""
-            **🎯 Win Rate**: Percentage of profitable trades
-            - Our models: 59-65%
-            - Random chance: 50%
-            - Good performance: >55%
-            
-            **⚡ Prediction Speed**: Time to generate forecast
-            - Real-time: <3 seconds
-            - Batch processing: <30 seconds
-            - Updated every 15 minutes
-            """)
-        
-        # Model comparison
-        st.subheader("🔍 Model Comparison")
-        
-        performance_data = self.load_performance_data()
-        if not performance_data.empty:
-            # Radar chart for model comparison
-            categories = ['Sharpe Ratio', 'Annual Return', 'Win Rate', 'Stability']
-            
+
+        portfolio_impact = cycle.get('portfolio_impact', {})
+        if portfolio_impact:
+            st.markdown('<div class="panel-title">Portfolio Impact</div>', unsafe_allow_html=True)
+            st.caption(
+                f"Risk level: `{portfolio_impact.get('risk_level', 'unknown')}` | "
+                f"Exposure utilization: {format_percent(portfolio_impact.get('utilization', 0))}"
+            )
+
+    def render_performance_page(self) -> None:
+        """Render saved performance analytics and validation metrics."""
+        performance = self.load_performance_data()
+        benchmarks = self.load_benchmark_data()
+        validation = self.load_validation_results()
+        curve_df = strategy_curve_from_validation(validation)
+
+        if performance.empty:
+            st.warning("Performance artifacts are unavailable.")
+            return
+
+        left, right = st.columns([0.95, 1.05])
+        with left:
+            st.markdown('<div class="panel-title">Model Ranking</div>', unsafe_allow_html=True)
+            ranking_columns = ['Model', 'Sharpe_Ratio', 'Annual_Return_Pct', 'Win_Rate_Pct', 'Drawdown_Pct']
+            rename_map = {
+                'Annual_Return_Pct': 'Annual Return (%)',
+                'Win_Rate_Pct': 'Win Rate (%)',
+                'Drawdown_Pct': 'Max Drawdown (%)'
+            }
+            if 'Benchmark_Annual_Return_Pct' in performance.columns:
+                ranking_columns.append('Benchmark_Annual_Return_Pct')
+                rename_map['Benchmark_Annual_Return_Pct'] = 'Benchmark Return (%)'
+            if 'Signal_Accuracy' in performance.columns:
+                ranking_columns.append('Signal_Accuracy')
+                rename_map['Signal_Accuracy'] = 'Signal Accuracy (%)'
+            ranking_df = performance[ranking_columns].rename(columns=rename_map)
+            st.dataframe(ranking_df, use_container_width=True, hide_index=True)
+
+        with right:
+            st.markdown('<div class="panel-title">Risk vs Return Surface</div>', unsafe_allow_html=True)
             fig = go.Figure()
-            
-            for _, model in performance_data.head(3).iterrows():
-                # Normalize metrics for radar chart
-                sharpe_norm = min(model['Sharpe_Ratio'] / 5, 1)  # Normalize to 0-1
-                return_norm = model['Annual_Return'] * 5  # Scale up return
-                win_norm = model['Win_Rate'] / 100  # Convert percentage
-                stability_norm = 0.8 + np.random.normal(0, 0.1)  # Simulate stability
-                
-                values = [sharpe_norm, return_norm, win_norm, stability_norm]
-                
-                fig.add_trace(go.Scatterpolar(
-                    r=values + [values[0]],  # Close the polygon
-                    theta=categories + [categories[0]],
-                    fill='toself',
-                    name=model['Model']
-                ))
-            
+            fig.add_trace(go.Scatter(
+                x=performance['Drawdown_Pct'].abs(),
+                y=performance['Annual_Return_Pct'],
+                mode='markers+text',
+                text=performance['Model'],
+                textposition='top center',
+                marker=dict(
+                    size=np.clip(performance['Sharpe_Ratio'] * 9, 10, 38),
+                    color=performance['Sharpe_Ratio'],
+                    colorscale='Viridis',
+                    showscale=True,
+                )
+            ))
             fig.update_layout(
-                polar=dict(
-                    radialaxis=dict(
-                        visible=True,
-                        range=[0, 1]
-                    )),
-                showlegend=True,
-                title="Model Performance Radar Chart",
-                height=500
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=430,
+                margin=dict(l=20, r=20, t=20, b=20),
+                xaxis_title='Absolute Max Drawdown (%)',
+                yaxis_title='Annual Return (%)',
             )
-            
             st.plotly_chart(fig, use_container_width=True)
 
-    def run(self):
-        """Main dashboard runner"""
-        self.render_header()
-        
-        # Sidebar navigation
-        page, selected_stocks, time_horizon, risk_tolerance = self.render_sidebar()
-        
-        # Main content based on selected page
-        if page == "🏠 Overview":
-            self.render_overview_page(selected_stocks)
-        elif page == "🔮 Live Predictions":
-            self.render_predictions_page(selected_stocks)
-        elif page == "📊 Performance Analytics":
-            self.render_performance_page()
-        elif page == "💼 Portfolio Optimizer":
-            self.render_portfolio_page(selected_stocks, risk_tolerance)
-        elif page == "🚨 Alert Center":
-            self.render_alerts_page()
-        elif page == "🤖 Model Insights":
-            self.render_model_insights_page()
-        
-        # Footer
-        st.markdown("---")
-        st.markdown("### 📈 Stock Market AI Prediction Engine - Day 14 Dashboard")
-        st.markdown("*Built with Streamlit, Plotly, and Advanced ML Models*")
+        st.markdown(
+            f"""
+            <div class="source-callout">
+                Performance metrics are cost-adjusted and annualized using a {self.config.FORECAST_HORIZON_DAYS}-day forecast horizon.
+                The benchmark suite uses the same evaluation dates and includes equal-weight, momentum, and simple mean-reversion baselines.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-def main():
-    """Main entry point"""
-    try:
-        dashboard = DashboardApp()
-        dashboard.run()
-    except Exception as e:
-        st.error(f"❌ Dashboard Error: {e}")
-        st.markdown("**Troubleshooting:**")
-        st.markdown("1. Ensure all model files are in place")
-        st.markdown("2. Check that Day 11 risk analysis completed")
-        st.markdown("3. Verify data files exist in data/processed/")
+        if not benchmarks.empty:
+            left, right = st.columns([1.0, 1.0])
+            with left:
+                st.markdown('<div class="panel-title">Benchmark Hurdle Table</div>', unsafe_allow_html=True)
+                benchmark_table = benchmarks[[
+                    'Benchmark',
+                    'Strategy_Type',
+                    'Sharpe_Ratio',
+                    'Annual_Return_Pct',
+                    'Win_Rate_Pct',
+                    'Drawdown_Pct',
+                ]].rename(columns={
+                    'Strategy_Type': 'Type',
+                    'Annual_Return_Pct': 'Annual Return (%)',
+                    'Win_Rate_Pct': 'Win Rate (%)',
+                    'Drawdown_Pct': 'Max Drawdown (%)',
+                })
+                st.dataframe(benchmark_table, use_container_width=True, hide_index=True)
+
+            with right:
+                st.markdown('<div class="panel-title">Models vs Benchmarks</div>', unsafe_allow_html=True)
+                comparison_df = pd.concat([
+                    performance[['Model', 'Sharpe_Ratio']].rename(columns={'Model': 'Name'}).assign(Group='Model'),
+                    benchmarks[['Benchmark', 'Sharpe_Ratio']].rename(columns={'Benchmark': 'Name'}).assign(Group='Benchmark'),
+                ], ignore_index=True)
+                comparison_df = comparison_df.sort_values('Sharpe_Ratio', ascending=False)
+                fig = go.Figure()
+                palette = comparison_df['Group'].map({'Model': '#62f7a6', 'Benchmark': '#f4b56a'})
+                fig.add_trace(go.Bar(
+                    x=comparison_df['Name'],
+                    y=comparison_df['Sharpe_Ratio'],
+                    marker_color=palette,
+                    text=comparison_df['Group'],
+                    textposition='outside',
+                    name='Sharpe ratio',
+                ))
+                fig.update_layout(
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    height=420,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    xaxis_tickangle=-30,
+                    yaxis_title='Sharpe Ratio',
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        if not curve_df.empty:
+            st.markdown('<div class="panel-title">Walk-Forward Equity Curve</div>', unsafe_allow_html=True)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=curve_df['Date'],
+                y=curve_df['StrategyValue'],
+                mode='lines',
+                line=dict(color='#62f7a6', width=2.5),
+            ))
+            fig.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=420,
+                margin=dict(l=20, r=20, t=20, b=20),
+                yaxis=dict(type='log', title='Strategy Index'),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        walk_forward = validation.get('walk_forward', {})
+        out_of_sample = validation.get('out_of_sample', {})
+        stability = validation.get('stability', {})
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("Walk-Forward R2", f"{walk_forward.get('overall_r2', 0):.3f}")
+        with cols[1]:
+            st.metric("Mean Fold R2", f"{walk_forward.get('mean_fold_r2', 0):.3f}")
+        with cols[2]:
+            st.metric("Out-of-Sample R2", f"{out_of_sample.get('r2', 0):.3f}")
+        with cols[3]:
+            st.metric("Stability Rating", str(stability.get('stability_rating', 'N/A')))
+
+    def render_portfolio_page(
+        self,
+        selected_stocks: List[str],
+        optimization_method: str,
+        target_return: float,
+    ) -> None:
+        """Render portfolio optimization results."""
+        st.markdown('<div class="panel-title">Portfolio Construction</div>', unsafe_allow_html=True)
+
+        if len(selected_stocks) < 2:
+            st.warning("Select at least two stocks in the sidebar.")
+            return
+
+        if st.button("Optimize Portfolio"):
+            with st.spinner("Optimizing allocation using real model outputs..."):
+                st.session_state.latest_portfolio = self.run_portfolio_optimization(
+                    selected_stocks, optimization_method, target_return
+                )
+                st.session_state.latest_portfolio_request = {
+                    'symbols': selected_stocks,
+                    'optimization_method': optimization_method,
+                    'target_return': target_return,
+                }
+
+        portfolio = st.session_state.get('latest_portfolio') or {}
+        if not portfolio:
+            st.info("Run portfolio optimization to inspect weights and risk metrics.")
+            return
+
+        st.caption(
+            f"Portfolio source: `{portfolio.get('_source', 'unknown')}` | "
+            f"Method: `{portfolio.get('optimization_method', optimization_method)}`"
+        )
+
+        cols = st.columns(3)
+        with cols[0]:
+            st.metric("Expected Return", format_percent(portfolio.get('expected_return', 0)))
+        with cols[1]:
+            st.metric("Volatility", format_percent(portfolio.get('volatility', 0)))
+        with cols[2]:
+            st.metric("Sharpe Ratio", f"{safe_float(portfolio.get('sharpe_ratio')):.2f}")
+
+        weights = portfolio.get('weights', {})
+        weights_df = pd.DataFrame({
+            'Symbol': list(weights.keys()),
+            'Weight': [safe_float(value) for value in weights.values()]
+        }).sort_values('Weight', ascending=False)
+        weights_df['WeightPct'] = weights_df['Weight'] * 100
+
+        left, right = st.columns([0.9, 1.1])
+        with left:
+            fig = go.Figure(data=[go.Pie(
+                labels=weights_df['Symbol'],
+                values=weights_df['WeightPct'],
+                hole=0.58,
+                marker=dict(colors=['#62f7a6', '#f4b56a', '#62c3ff', '#ff7a63', '#dce38f', '#7fd6bb']),
+            )])
+            fig.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                height=430,
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with right:
+            st.dataframe(
+                weights_df.rename(columns={'WeightPct': 'Weight (%)'}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    def render_alerts_page(self, selected_stocks: List[str]) -> None:
+        """Render live alert feed and retraining triggers."""
+        st.markdown('<div class="panel-title">Alert Scanner</div>', unsafe_allow_html=True)
+
+        if st.button("Refresh Alert Feed"):
+            with st.spinner("Refreshing alert feed from the live signal engine..."):
+                st.session_state.latest_cycle = self.run_prediction_cycle(selected_stocks or self.get_target_stocks()[:5])
+                st.session_state.latest_cycle_symbols = selected_stocks
+
+        cycle = st.session_state.get('latest_cycle') or {}
+        alerts = cycle.get('alerts', [])
+        triggers = cycle.get('retraining_triggers', [])
+
+        if not alerts and not triggers:
+            st.info("No live alerts in session. Run a live scan from the Predictions page or refresh here.")
+            return
+
+        if alerts:
+            alerts_df = pd.DataFrame(alerts)
+            cols = st.columns(3)
+            with cols[0]:
+                st.metric("Total Alerts", str(len(alerts_df)))
+            with cols[1]:
+                st.metric("High Confidence", str((alerts_df['type'] == 'high_confidence_signal').sum()))
+            with cols[2]:
+                st.metric("Risk Limit", str((alerts_df['type'] == 'risk_limit_exceeded').sum()))
+
+            st.dataframe(alerts_df, use_container_width=True, hide_index=True)
+
+            counts = alerts_df.groupby(['symbol', 'type']).size().reset_index(name='count')
+            fig = go.Figure()
+            for alert_type in counts['type'].unique():
+                subset = counts[counts['type'] == alert_type]
+                fig.add_trace(go.Bar(x=subset['symbol'], y=subset['count'], name=alert_type))
+            fig.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=360,
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        if triggers:
+            st.markdown('<div class="panel-title">Automated Retraining Triggers</div>', unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame(triggers), use_container_width=True, hide_index=True)
+
+    def render_model_insights_page(self) -> None:
+        """Render model lineup, feature importance, and validation quality signals."""
+        performance = self.load_performance_data()
+        feature_df = self.load_feature_importance()
+        validation = self.load_validation_results()
+        triggers = self.load_retraining_triggers()
+        health = self.backend_health()
+
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("Models Available", str(len(performance)))
+        with cols[1]:
+            st.metric("Backend Loaded", str(health.get('models_loaded', 0)))
+        with cols[2]:
+            st.metric("WF Predictions", str(validation.get('walk_forward', {}).get('total_predictions', 0)))
+        with cols[3]:
+            st.metric("Saved Drift Triggers", str(len(triggers)))
+
+        st.markdown(
+            """
+            <div class="source-callout">
+                This page is wired to live API metadata, saved feature importance artifacts, validation outputs,
+                and retraining trigger files. The static placeholder explanation content was removed.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        left, right = st.columns([0.95, 1.05])
+        with left:
+            st.markdown('<div class="panel-title">Model Roster</div>', unsafe_allow_html=True)
+            roster = performance[['Model', 'Sharpe_Ratio', 'Annual_Return_Pct', 'Win_Rate_Pct']].rename(columns={
+                'Annual_Return_Pct': 'Annual Return (%)',
+                'Win_Rate_Pct': 'Win Rate (%)',
+            })
+            st.dataframe(roster, use_container_width=True, hide_index=True)
+
+        with right:
+            st.markdown('<div class="panel-title">Validation Quality</div>', unsafe_allow_html=True)
+            stability = validation.get('stability', {})
+            walk_forward = validation.get('walk_forward', {})
+            st.write(
+                {
+                    'stability_rating': stability.get('stability_rating'),
+                    'overall_stability_score': stability.get('overall_stability_score'),
+                    'walk_forward_r2': walk_forward.get('overall_r2'),
+                    'mean_fold_r2': walk_forward.get('mean_fold_r2'),
+                    'out_of_sample_r2': validation.get('out_of_sample', {}).get('r2'),
+                }
+            )
+
+        if not feature_df.empty:
+            model_options = sorted(feature_df['model'].unique())
+            selected_model = st.selectbox("Feature Importance Model", model_options)
+            top_features = (
+                feature_df[feature_df['model'] == selected_model]
+                .sort_values('importance', ascending=True)
+                .tail(12)
+            )
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=top_features['importance'],
+                y=top_features['feature'],
+                orientation='h',
+                marker_color='#62c3ff',
+            ))
+            fig.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=420,
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    def run(self) -> None:
+        """Render the full dashboard."""
+        inject_theme()
+
+        sidebar_state = self.render_sidebar()
+        selected_stocks = sidebar_state['selected_stocks']
+        self.render_hero(selected_stocks)
+
+        page = sidebar_state['page']
+        if page == "Overview":
+            self.render_overview_page(selected_stocks)
+        elif page == "Live Predictions":
+            self.render_predictions_page(selected_stocks)
+        elif page == "Performance Analytics":
+            self.render_performance_page()
+        elif page == "Portfolio Optimizer":
+            self.render_portfolio_page(
+                selected_stocks,
+                sidebar_state['optimization_mode'],
+                sidebar_state['target_return'],
+            )
+        elif page == "Alert Center":
+            self.render_alerts_page(selected_stocks)
+        elif page == "Model Insights":
+            self.render_model_insights_page()
+
+        st.markdown("---")
+        st.markdown(
+            '<div class="footer-note">Stock Market Prediction Engine | Dynamic data only | Streamlit control room</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def main() -> None:
+    """Main dashboard entry point."""
+    app = DashboardApp()
+    app.run()
+
 
 if __name__ == "__main__":
     main()

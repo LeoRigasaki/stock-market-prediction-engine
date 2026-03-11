@@ -3,6 +3,8 @@ services:
   stock-api:
     image: leorigasaki535/stock-prediction-api:latest
     container_name: stock-prediction-api
+    environment:
+      - STOCK_ENGINE_API_KEY=demo_key_12345
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -19,6 +21,9 @@ services:
   stock-dashboard:
     image: leorigasaki535/stock-prediction-dashboard:latest
     container_name: stock-prediction-dashboard
+    environment:
+      - STOCK_ENGINE_API_URL=http://stock-api:8000
+      - STOCK_ENGINE_API_KEY=demo_key_12345
     ports:
       - "8501:8501"
     restart: unless-stopped

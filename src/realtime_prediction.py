@@ -15,6 +15,7 @@ from pathlib import Path
 import ta
 
 from .config import Config
+from .consensus_model import ConsensusMetaEnsemble
 
 class RealTimePredictionEngine:
     """High-performance real-time prediction system"""
@@ -23,6 +24,8 @@ class RealTimePredictionEngine:
         self.config = Config()
         self.models = {}
         self.best_model = None
+        self.primary_model_name = ""
+        self.model_scores = {}
         self.feature_columns = []
         self.scalers = {}
         self.last_predictions = {}
@@ -31,32 +34,79 @@ class RealTimePredictionEngine:
             'risk_limit': 0.05        # Lower risk threshold
         }
         self.performance_cache = {}
+        self.drift_detector = ModelDriftDetector(self.config)
+
+    def _load_model_scores(self) -> Dict[str, float]:
+        """Load model ranking scores from the latest saved risk summary."""
+        risk_summary_path = self.config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"
+        if not risk_summary_path.exists():
+            return {}
+
+        try:
+            risk_df = pd.read_csv(risk_summary_path)
+            if risk_df.empty or 'Model' not in risk_df.columns:
+                return {}
+
+            score_column = 'Sharpe_Ratio'
+            if 'Gross_Sharpe_Ratio' in risk_df.columns:
+                score_column = 'Sharpe_Ratio'
+
+            scores = {}
+            for _, row in risk_df.iterrows():
+                raw_score = float(row.get(score_column, 0.0))
+                scores[row['Model']] = max(raw_score, 0.05)
+            return scores
+        except Exception as exc:
+            logger.warning(f"Failed to load model scores from risk summary: {exc}")
+            return {}
         
     def load_production_models(self) -> bool:
         """Load best performing models for production"""
         logger.info("Loading production models...")
         
         try:
-            # Load the best ensemble model (Ensemble_SimpleAverage from Day 11)
             ensemble_dir = self.config.PROJECT_ROOT / "models" / "ensemble"
-            best_model_path = ensemble_dir / "simple_average_ensemble.joblib"
-            
-            if best_model_path.exists():
-                self.best_model = joblib.load(best_model_path)
-                self.models['Ensemble_SimpleAverage'] = self.best_model
-                logger.info("✅ Loaded best model: Ensemble_SimpleAverage")
-            
-            # Load backup models
-            backup_models = {
-                'VotingRegressor': ensemble_dir / "voting_regressor_ensemble.joblib",
+            model_files = {
+                'Ensemble_SimpleAverage': ensemble_dir / "simple_average_ensemble.joblib",
+                'Ensemble_VotingRegressor': ensemble_dir / "voting_regressor_ensemble.joblib",
+                'Ensemble_StackedEnsemble': ensemble_dir / "stacked_ensemble_ensemble.joblib",
                 'XGBoost': self.config.PROJECT_ROOT / "models" / "advanced" / "regression_xgboost_optimized.joblib",
+                'LightGBM': self.config.PROJECT_ROOT / "models" / "advanced" / "regression_lightgbm_optimized.joblib",
                 'RandomForest': self.config.PROJECT_ROOT / "models" / "regression_random_forest.joblib"
             }
-            
-            for name, path in backup_models.items():
+
+            for name, path in model_files.items():
                 if path.exists():
                     self.models[name] = joblib.load(path)
-                    logger.info(f"✅ Loaded backup model: {name}")
+                    logger.info(f"✅ Loaded production model: {name}")
+
+            self.model_scores = self._load_model_scores()
+            consensus_components = {
+                name: model for name, model in self.models.items()
+                if name in {
+                    'Ensemble_VotingRegressor',
+                    'Ensemble_SimpleAverage',
+                    'XGBoost',
+                    'LightGBM',
+                    'RandomForest',
+                }
+            }
+            if len(consensus_components) >= 2:
+                self.models['ConsensusMetaEnsemble'] = ConsensusMetaEnsemble(
+                    consensus_components,
+                    model_scores=self.model_scores,
+                )
+                logger.info("✅ Loaded derived production model: ConsensusMetaEnsemble")
+
+            if self.models:
+                ranked_models = sorted(
+                    self.models.keys(),
+                    key=lambda model_name: self.model_scores.get(model_name, 0.0),
+                    reverse=True,
+                )
+                self.primary_model_name = ranked_models[0]
+                self.best_model = self.models[self.primary_model_name]
+                logger.info(f"✅ Selected primary production model: {self.primary_model_name}")
             
             # Load EXACT feature columns from training data
             self.feature_columns = self._get_exact_training_features()
@@ -400,42 +450,64 @@ class RealTimePredictionEngine:
         predictions = {}
         
         try:
-            if self.best_model is not None:
-                # Primary prediction with best model
-                pred = self.best_model.predict(feature_data)[0]
-                
-                # Ensure prediction is not NaN or inf
-                if pd.isna(pred) or np.isinf(pred):
-                    pred = 0.0
-                
-                predictions['primary'] = {
-                    'model': 'Ensemble_SimpleAverage',
-                    'prediction': float(pred),
-                    'confidence': 'high' if abs(pred) > self.alert_thresholds['high_confidence'] else 'medium'
-                }
-                
-                # Generate ensemble prediction if multiple models available
-                if len(self.models) > 1:
-                    all_preds = []
-                    for model_name, model in self.models.items():
-                        try:
-                            model_pred = model.predict(feature_data)[0]
-                            if not (pd.isna(model_pred) or np.isinf(model_pred)):
-                                all_preds.append(model_pred)
-                                predictions[model_name] = float(model_pred)
-                        except Exception as model_error:
-                            logger.warning(f"Model {model_name} prediction failed: {model_error}")
+            if self.models:
+                model_predictions = {}
+                for model_name, model in self.models.items():
+                    try:
+                        model_pred = model.predict(feature_data)[0]
+                        if pd.isna(model_pred) or np.isinf(model_pred):
                             continue
-                    
-                    if all_preds and len(all_preds) > 1:
-                        ensemble_pred = np.mean(all_preds)
-                        predictions['ensemble_average'] = float(ensemble_pred)
-                
-                # Add metadata
+                        model_predictions[model_name] = float(model_pred)
+                        predictions[model_name] = float(model_pred)
+                    except Exception as model_error:
+                        logger.warning(f"Model {model_name} prediction failed: {model_error}")
+
+                if not model_predictions:
+                    return predictions
+
+                consensus_prediction = model_predictions.get('ConsensusMetaEnsemble')
+                base_prediction_names = [
+                    name for name in model_predictions.keys()
+                    if name != 'ConsensusMetaEnsemble'
+                ]
+                available_names = base_prediction_names or list(model_predictions.keys())
+                raw_scores = np.array([self.model_scores.get(name, 1.0) for name in available_names], dtype=float)
+                normalized_scores = raw_scores / raw_scores.sum() if raw_scores.sum() > 0 else np.ones(len(raw_scores)) / len(raw_scores)
+                all_preds = np.array([model_predictions[name] for name in available_names], dtype=float)
+
+                weighted_pred = float(np.average(all_preds, weights=normalized_scores))
+                prediction_dispersion = float(np.std(all_preds)) if len(all_preds) > 1 else 0.0
+                interval_width = max(prediction_dispersion, self.alert_thresholds['high_confidence'] / 2)
+                top_model_name = max(available_names, key=lambda name: self.model_scores.get(name, 0.0))
+                primary_prediction = float(consensus_prediction) if consensus_prediction is not None else weighted_pred
+                threshold = self.config.signal_threshold_pct()
+                confidence_label = (
+                    'high' if abs(primary_prediction) > max(self.alert_thresholds['high_confidence'], threshold * 2)
+                    else 'medium' if abs(primary_prediction) > threshold
+                    else 'low'
+                )
+
+                predictions['primary'] = {
+                    'model': 'ConsensusMetaEnsemble' if consensus_prediction is not None else 'ScoreWeightedEnsemble',
+                    'prediction': primary_prediction,
+                    'confidence': confidence_label,
+                    'top_component_model': top_model_name,
+                }
+                predictions['ensemble_average'] = float(np.mean(all_preds))
+                predictions['weighted_ensemble'] = weighted_pred
+                if consensus_prediction is not None:
+                    predictions['consensus_meta_ensemble'] = primary_prediction
+                predictions['model_dispersion'] = prediction_dispersion
+                predictions['model_agreement'] = float(max(0.0, 1.0 - min(prediction_dispersion / 0.1, 1.0)))
+                predictions['models_used'] = len(all_preds)
+                predictions['confidence_interval'] = {
+                    'lower': float(primary_prediction - interval_width),
+                    'upper': float(primary_prediction + interval_width)
+                }
                 predictions['timestamp'] = datetime.now().isoformat()
                 predictions['symbol'] = symbol
-                
-                logger.info(f"✅ Generated predictions for {symbol}: {pred:.4f}")
+
+                logger.info(f"✅ Generated predictions for {symbol}: {primary_prediction:.4f}")
                 
         except Exception as e:
             logger.error(f"❌ Prediction failed for {symbol}: {e}")
@@ -505,7 +577,12 @@ class RealTimePredictionEngine:
             risk_summary_path = self.config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"
             if risk_summary_path.exists():
                 risk_df = pd.read_csv(risk_summary_path)
-                best_model_risk = risk_df[risk_df['Model'] == 'Ensemble_SimpleAverage']
+                if 'Sharpe_Ratio' in risk_df.columns:
+                    best_model_row = risk_df.loc[risk_df['Sharpe_Ratio'].idxmax()]
+                    best_model_name = best_model_row['Model']
+                    best_model_risk = risk_df[risk_df['Model'] == best_model_name]
+                else:
+                    best_model_risk = risk_df
                 if not best_model_risk.empty:
                     optimal_position = best_model_risk['Kelly_Position_Size'].iloc[0]
                 else:
@@ -547,6 +624,18 @@ class RealTimePredictionEngine:
         except Exception as e:
             logger.error(f"❌ Portfolio impact calculation failed: {e}")
             return {}
+
+    def evaluate_drift_monitoring(self, all_predictions: Dict[str, Dict]) -> Dict[str, Any]:
+        """Update drift tracking and emit retraining triggers when thresholds are breached."""
+        if not all_predictions:
+            return {'reports': {}, 'triggers': []}
+
+        try:
+            self.drift_detector.update_performance_metrics(all_predictions)
+            return self.drift_detector.evaluate_symbols(list(all_predictions.keys()))
+        except Exception as e:
+            logger.error(f"❌ Drift monitoring failed: {e}")
+            return {'reports': {}, 'triggers': [], 'error': str(e)}
     
     async def run_realtime_cycle(self) -> Dict[str, Any]:
         """Run a complete real-time prediction cycle"""
@@ -559,6 +648,8 @@ class RealTimePredictionEngine:
             'alerts': [],
             'portfolio_impact': {},
             'performance_metrics': {},
+            'drift_monitoring': {},
+            'retraining_triggers': [],
             'errors': []
         }
         
@@ -607,14 +698,19 @@ class RealTimePredictionEngine:
             # 5. Compile results
             results['predictions'] = all_predictions
             results['alerts'] = all_alerts
+            drift_report = self.evaluate_drift_monitoring(all_predictions)
+            results['drift_monitoring'] = drift_report.get('reports', {})
+            results['retraining_triggers'] = drift_report.get('triggers', [])
             
             # 6. Performance metrics
             cycle_time = time.time() - cycle_start
             results['performance_metrics'] = {
                 'cycle_time_seconds': cycle_time,
                 'symbols_processed': len(all_predictions),
-                'predictions_generated': sum(len(p) for p in all_predictions.values()),
+                'primary_signals_generated': len(all_predictions),
+                'model_outputs_generated': sum(int(pred.get('models_used', 1)) for pred in all_predictions.values()),
                 'alerts_triggered': len(all_alerts),
+                'retraining_triggers': len(results['retraining_triggers']),
                 'success_rate': len(all_predictions) / len(symbols) if symbols else 0
             }
             
@@ -751,3 +847,48 @@ class ModelDriftDetector:
             }
         
         return {'drift_detected': False, 'reason': 'zero_historical_variance'}
+
+    def save_retraining_trigger(self, symbol: str, drift_report: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist a retraining trigger so monitoring and automation can pick it up."""
+        trigger = {
+            'symbol': symbol,
+            'created_at': datetime.now().isoformat(),
+            'reason': 'model_drift_detected',
+            'variance_ratio': drift_report.get('variance_ratio'),
+            'threshold': drift_report.get('threshold'),
+            'recommendation': drift_report.get('recommendation', 'retrain_model')
+        }
+
+        try:
+            trigger_path = self.config.PROCESSED_DATA_PATH / "retraining_triggers.json"
+            existing_triggers = []
+
+            if trigger_path.exists():
+                with open(trigger_path, 'r') as f:
+                    existing_triggers = json.load(f)
+                    if not isinstance(existing_triggers, list):
+                        existing_triggers = []
+
+            existing_triggers.append(trigger)
+            existing_triggers = existing_triggers[-100:]
+
+            with open(trigger_path, 'w') as f:
+                json.dump(existing_triggers, f, indent=2)
+        except Exception as e:
+            trigger['persistence_error'] = str(e)
+
+        return trigger
+
+    def evaluate_symbols(self, symbols: List[str]) -> Dict[str, Any]:
+        """Evaluate drift across multiple symbols and create retraining triggers where needed."""
+        reports = {}
+        triggers = []
+
+        for symbol in symbols:
+            report = self.detect_drift(symbol)
+            reports[symbol] = report
+
+            if report.get('drift_detected'):
+                triggers.append(self.save_retraining_trigger(symbol, report))
+
+        return {'reports': reports, 'triggers': triggers}

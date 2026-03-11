@@ -22,6 +22,7 @@ from pathlib import Path
 import itertools
 
 from .config import Config
+from .consensus_model import ConsensusMetaEnsemble, load_model_scores
 
 class ValidationFramework:
     """Comprehensive model validation and backtesting framework"""
@@ -87,6 +88,23 @@ class ValidationFramework:
                 except Exception as e:
                     logger.warning(f"Failed to load ensemble {name}: {e}")
         
+        consensus_components = {
+            name: model for name, model in models.items()
+            if name in {
+                'Ensemble_VotingRegressor',
+                'Ensemble_SimpleAverage',
+                'XGBoost',
+                'LightGBM',
+                'RandomForest',
+            }
+        }
+        if len(consensus_components) >= 2:
+            models['ConsensusMetaEnsemble'] = ConsensusMetaEnsemble(
+                consensus_components,
+                model_scores=load_model_scores(self.config),
+            )
+            logger.info("Loaded derived validation model: ConsensusMetaEnsemble")
+
         logger.info(f"Loaded {loaded_individual} individual models and {loaded_ensemble} ensemble models")
         logger.info(f"Total models for validation: {len(models)}")
         
@@ -98,7 +116,7 @@ class ValidationFramework:
         
         df = pd.read_csv(features_path)
         df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values(['Ticker', 'Date']).reset_index(drop=True)
+        df = df.sort_values(['Date', 'Ticker']).reset_index(drop=True)
         
         logger.info(f"Loaded feature data: {len(df)} records, {df.shape[1]} features")
         return df
@@ -113,6 +131,16 @@ class ValidationFramework:
         y = df['return_5d'].fillna(df['return_5d'].median())
         
         return X, y, feature_cols
+
+    def prediction_positions(self, predictions: np.ndarray) -> np.ndarray:
+        """Convert predictions in percentage space into long/short/flat positions."""
+        threshold = self.config.signal_threshold_pct()
+        pred_array = np.asarray(predictions, dtype=float)
+        return np.where(
+            pred_array > threshold,
+            1.0,
+            np.where(pred_array < -threshold, -1.0, 0.0),
+        )
     
     def walk_forward_validation(self, df: pd.DataFrame, X: pd.DataFrame, y: np.ndarray, 
                               model: Any, model_name: str, window_size: int = 252, 
@@ -121,35 +149,37 @@ class ValidationFramework:
         logger.info(f"Performing walk-forward validation for {model_name}")
         logger.info(f"Window size: {window_size} days, Step size: {step_size} days")
         
-        # Sort by date to ensure proper temporal order
+        # Ensure every structure uses the same chronological ordering
         df_sorted = df.sort_values(['Date', 'Ticker']).reset_index(drop=True)
-        X_sorted = X.loc[df_sorted.index]
-        y_sorted = y.loc[df_sorted.index] if isinstance(y, pd.Series) else y[df_sorted.index]
+        X_sorted = X.reset_index(drop=True)
+        y_sorted = y.reset_index(drop=True) if isinstance(y, pd.Series) else pd.Series(y).reset_index(drop=True)
         
         predictions = []
         actuals = []
         dates = []
         fold_results = []
-        
+
+        unique_dates = np.array(sorted(df_sorted['Date'].dropna().unique()))
         start_idx = window_size
-        max_idx = len(df_sorted) - step_size
+        max_idx = len(unique_dates) - step_size
         
         fold_count = 0
         while start_idx < max_idx:
-            # Define training and testing windows
-            train_end = start_idx
-            train_start = max(0, train_end - window_size)
-            test_start = train_end
-            test_end = min(len(df_sorted), test_start + step_size)
-            
-            # Extract training and testing data
-            X_train = X_sorted.iloc[train_start:train_end]
-            y_train = y_sorted.iloc[train_start:train_end] if isinstance(y_sorted, pd.Series) else y_sorted[train_start:train_end]
-            X_test = X_sorted.iloc[test_start:test_end]
-            y_test = y_sorted.iloc[test_start:test_end] if isinstance(y_sorted, pd.Series) else y_sorted[test_start:test_end]
-            
-            # Get corresponding dates
-            test_dates = df_sorted.iloc[test_start:test_end]['Date'].tolist()
+            train_dates = unique_dates[max(0, start_idx - window_size):start_idx]
+            test_dates_window = unique_dates[start_idx:start_idx + step_size]
+
+            train_mask = df_sorted['Date'].isin(train_dates).to_numpy()
+            test_mask = df_sorted['Date'].isin(test_dates_window).to_numpy()
+
+            X_train = X_sorted.loc[train_mask]
+            y_train = y_sorted.loc[train_mask]
+            X_test = X_sorted.loc[test_mask]
+            y_test = y_sorted.loc[test_mask]
+            test_dates = df_sorted.loc[test_mask, 'Date'].tolist()
+
+            if X_train.empty or X_test.empty:
+                start_idx += step_size
+                continue
             
             try:
                 # Handle different model types
@@ -176,10 +206,10 @@ class ValidationFramework:
                 
                 fold_results.append({
                     'fold': fold_count,
-                    'train_start': df_sorted.iloc[train_start]['Date'],
-                    'train_end': df_sorted.iloc[train_end-1]['Date'],
-                    'test_start': df_sorted.iloc[test_start]['Date'],
-                    'test_end': df_sorted.iloc[test_end-1]['Date'],
+                    'train_start': pd.Timestamp(train_dates[0]),
+                    'train_end': pd.Timestamp(train_dates[-1]),
+                    'test_start': pd.Timestamp(test_dates_window[0]),
+                    'test_end': pd.Timestamp(test_dates_window[-1]),
                     'mse': fold_mse,
                     'mae': fold_mae,
                     'r2': fold_r2,
@@ -234,17 +264,20 @@ class ValidationFramework:
         
         # Sort by date and use latest data for out-of-sample testing
         df_sorted = df.sort_values(['Date', 'Ticker']).reset_index(drop=True)
-        split_idx = int(len(df_sorted) * (1 - test_ratio))
-        
-        # Split data
-        X_train = X.iloc[:split_idx]
-        X_test = X.iloc[split_idx:]
-        y_train = y.iloc[:split_idx] if isinstance(y, pd.Series) else y[:split_idx]
-        y_test = y.iloc[split_idx:] if isinstance(y, pd.Series) else y[split_idx:]
-        
-        # Get date ranges
-        train_dates = df_sorted.iloc[:split_idx]['Date']
-        test_dates = df_sorted.iloc[split_idx:]['Date']
+        X_sorted = X.reset_index(drop=True)
+        y_sorted = y.reset_index(drop=True) if isinstance(y, pd.Series) else pd.Series(y).reset_index(drop=True)
+        unique_dates = np.array(sorted(df_sorted['Date'].dropna().unique()))
+        split_idx = int(len(unique_dates) * (1 - test_ratio))
+        train_dates = unique_dates[:split_idx]
+        test_dates = unique_dates[split_idx:]
+
+        train_mask = df_sorted['Date'].isin(train_dates).to_numpy()
+        test_mask = df_sorted['Date'].isin(test_dates).to_numpy()
+
+        X_train = X_sorted.loc[train_mask]
+        X_test = X_sorted.loc[test_mask]
+        y_train = y_sorted.loc[train_mask]
+        y_test = y_sorted.loc[test_mask]
         
         logger.info(f"Training period: {train_dates.min().date()} to {train_dates.max().date()}")
         logger.info(f"Testing period: {test_dates.min().date()} to {test_dates.max().date()}")
@@ -268,17 +301,17 @@ class ValidationFramework:
                 'model_name': model_name,
                 'train_samples': len(X_train),
                 'test_samples': len(X_test),
-                'train_start': train_dates.min(),
-                'train_end': train_dates.max(),
-                'test_start': test_dates.min(),
-                'test_end': test_dates.max(),
+                'train_start': pd.Timestamp(train_dates.min()),
+                'train_end': pd.Timestamp(train_dates.max()),
+                'test_start': pd.Timestamp(test_dates.min()),
+                'test_end': pd.Timestamp(test_dates.max()),
                 'mse': mean_squared_error(y_test, y_pred),
                 'mae': mean_absolute_error(y_test, y_pred),
                 'r2': r2_score(y_test, y_pred),
                 'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
                 'predictions': y_pred.tolist(),
                 'actuals': y_test.tolist() if isinstance(y_test, pd.Series) else y_test.tolist(),
-                'test_dates': test_dates.tolist()
+                'test_dates': pd.Series(df_sorted.loc[test_mask, 'Date']).tolist()
             }
             
             logger.info(f"Out-of-sample R² for {model_name}: {oos_results['r2']:.4f}")
@@ -524,40 +557,41 @@ class ValidationFramework:
         
         # Calculate prediction-based strategy returns
         # Simple strategy: long when prediction > 0, short when prediction < 0
-        strategy_returns = np.where(pred_array > 0, actual_array, -actual_array)
+        positions = self.prediction_positions(pred_array)
+        strategy_returns = positions * actual_array
         
         # Remove extreme outliers
         strategy_returns = np.clip(strategy_returns, 
                                  np.percentile(strategy_returns, 1), 
                                  np.percentile(strategy_returns, 99))
-        
-        # Risk-free rate (assumed 2% annually, converted to daily)
-        risk_free_rate = 0.02 / 252
-        
+
+        periods_per_year = self.config.periods_per_year()
+        period_risk_free_rate = self.config.period_risk_free_rate()
+
         # Performance metrics
         total_return = np.sum(strategy_returns)
         mean_return = np.mean(strategy_returns)
         volatility = np.std(strategy_returns)
-        
+
         # Sharpe ratio
-        excess_return = mean_return - risk_free_rate
+        excess_return = mean_return - period_risk_free_rate
         sharpe_ratio = excess_return / volatility if volatility != 0 else 0
-        
+
         # Sortino ratio (downside deviation)
-        downside_returns = strategy_returns[strategy_returns < risk_free_rate]
+        downside_returns = strategy_returns[strategy_returns < period_risk_free_rate]
         downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else volatility
         sortino_ratio = excess_return / downside_deviation if downside_deviation != 0 else 0
-        
+
         # Maximum drawdown
-        cumulative_returns = np.cumsum(strategy_returns)
+        cumulative_returns = np.cumprod(1 + np.clip(strategy_returns, -0.95, None))
         peak = np.maximum.accumulate(cumulative_returns)
-        drawdown = (cumulative_returns - peak)
+        drawdown = (cumulative_returns / peak) - 1
         max_drawdown = np.min(drawdown) if len(drawdown) > 0 else 0
-        
+
         # Calmar ratio
-        annualized_return = mean_return * 252
+        annualized_return = mean_return * periods_per_year
         calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0
-        
+
         # Information ratio (vs buy-and-hold)
         benchmark_returns = actual_array  # Buy and hold actual returns
         active_returns = strategy_returns - benchmark_returns
@@ -576,18 +610,21 @@ class ValidationFramework:
         risk_metrics = {
             'total_return': total_return,
             'annualized_return': annualized_return,
-            'volatility': volatility * np.sqrt(252),  # Annualized
-            'sharpe_ratio': sharpe_ratio * np.sqrt(252),  # Annualized
-            'sortino_ratio': sortino_ratio * np.sqrt(252),  # Annualized
+            'volatility': volatility * np.sqrt(periods_per_year),
+            'sharpe_ratio': sharpe_ratio * np.sqrt(periods_per_year),
+            'sortino_ratio': sortino_ratio * np.sqrt(periods_per_year),
             'calmar_ratio': calmar_ratio,
-            'information_ratio': information_ratio * np.sqrt(252),  # Annualized
+            'information_ratio': information_ratio * np.sqrt(periods_per_year),
             'max_drawdown': max_drawdown,
             'var_95': var_95,
             'cvar_95': cvar_95,
             'win_rate': win_rate,
+            'trade_rate': float(np.mean(positions != 0) * 100),
             'total_trades': len(strategy_returns),
             'profitable_trades': np.sum(strategy_returns > 0),
-            'loss_making_trades': np.sum(strategy_returns < 0)
+            'loss_making_trades': np.sum(strategy_returns < 0),
+            'forecast_horizon_days': self.config.FORECAST_HORIZON_DAYS,
+            'periods_per_year': periods_per_year,
         }
         
         logger.info(f"Risk-adjusted metrics for {model_name}:")
@@ -1045,6 +1082,9 @@ class ValidationFramework:
         
         # Handle both possible data structures
         validation_results = results.get('validation_results', results)
+        if set(validation_results.keys()) >= {'walk_forward', 'out_of_sample', 'robustness', 'risk_metrics', 'stability'}:
+            model_name = validation_results.get('walk_forward', {}).get('model_name', 'SelectedModel')
+            validation_results = {model_name: validation_results}
         
         # Save summary metrics
         summary_data = []

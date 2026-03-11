@@ -1,315 +1,232 @@
-# 📈 Stock Market Prediction Engine
+# Stock Market Prediction Engine
 
-> **Advanced Machine Learning System for Real-Time Stock Market Analysis and Prediction**
+Research-oriented stock prediction and portfolio analytics system built with FastAPI, Streamlit, and classical/ensemble ML models.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)](https://github.com/LeoRigasaki/Stock-Engine)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+This repository is best understood as an end-to-end applied data science project, not proof of deployable trading alpha. It includes:
+- live inference from current market data
+- saved walk-forward validation artifacts
+- risk and portfolio analysis
+- a dashboard and API for inspection
 
-## 🚀 One-Command Demo
+## Reality Check
 
-### **Interactive Dashboard (Recommended)**
+The strongest improvement in this revision is methodological honesty:
+- performance metrics are now annualized on the correct 5-day forecast horizon
+- dashboard and API performance tiles now use cost-adjusted risk metrics
+- live inference no longer hardcodes one "best" model and instead ranks models from the saved evaluation summary
+- validation pages now surface predictive quality metrics directly instead of hiding behind Sharpe alone
+
+If you are reviewing this as a hiring or client project, the right takeaway is:
+- good engineering depth
+- real artifact pipeline
+- useful ML and risk tooling
+- still a research system with meaningful predictive limitations
+
+## Verified Evaluation Snapshot
+
+The current saved evaluation reflects a 5-day forecast horizon with a 10 bps transaction-cost assumption per evaluation period.
+
+### Cost-Adjusted Risk Summary
+
+| Metric | Value | Source |
+| --- | ---: | --- |
+| Best net Sharpe | 3.72 | `data/processed/day11_risk_summary.csv` |
+| Best gross Sharpe | 4.00 | `data/processed/day11_risk_summary.csv` |
+| Best model | `Ensemble_SimpleAverage` | `data/processed/day11_risk_summary.csv` |
+| Best benchmark | `EqualWeightLongOnly` | `data/processed/day11_benchmark_summary.csv` |
+| Best benchmark Sharpe | 0.74 | `data/processed/day11_benchmark_summary.csv` |
+| Model edge vs best benchmark | +2.98 Sharpe | `data/processed/day11_risk_summary.csv`, `data/processed/day11_benchmark_summary.csv` |
+| Net annual return | 69.96% | `data/processed/day11_risk_summary.csv` |
+| Best benchmark annual return | 21.03% | `data/processed/day11_benchmark_summary.csv` |
+| Trade accuracy | 62.40% | `data/processed/day11_risk_summary.csv` |
+| Trade rate | 87.87% | `data/processed/day11_risk_summary.csv` |
+| Signal accuracy | 54.86% | `data/processed/day11_risk_summary.csv` |
+| Max drawdown | -41.35% | `data/processed/day11_risk_summary.csv` |
+
+### Predictive Validation Summary
+
+| Metric | Value | Source |
+| --- | ---: | --- |
+| Walk-forward R2 | 0.140 | `data/processed/day10_validation_results.json` |
+| Mean fold R2 | -0.273 | `data/processed/day10_validation_results.json` |
+| Out-of-sample R2 | -0.013 | `data/processed/day10_validation_results.json` |
+| Stability rating | `Excellent` | `data/processed/day10_validation_results.json` |
+| Stability score | 3.278 | `data/processed/day10_validation_results.json` |
+
+These numbers are intentionally presented together because they tell a more truthful story:
+- the strategy backtest is materially stronger than the pure predictive fit
+- the model can still be useful for ranking or signal generation even when out-of-sample regression fit is weak
+- the project should be discussed as a research and signal-engineering system, not as a proven production trading business
+
+## What The System Does
+
+### Backend
+- FastAPI service for prediction, model performance, portfolio optimization, and alerting
+- authenticated endpoints for `/predict`, `/predict/detailed`, `/portfolio/optimize`, `/models/performance`, and `/alerts/active`
+- real-time market fetches via `yfinance`
+
+### Frontend
+- Streamlit dashboard for:
+  - overview and provenance
+  - live predictions
+  - performance analytics
+  - portfolio optimization
+  - alert review
+  - model insights
+
+### Modeling
+- ensemble models: simple average, voting regressor, stacked ensemble
+- individual models: XGBoost, LightGBM, Random Forest
+- 73 engineered features from technical and statistical signals
+- walk-forward validation and out-of-sample evaluation artifacts
+
+## Why This Version Is Better
+
+This revision addresses the main credibility issues that usually make quant portfolio projects look fake:
+
+1. It does not present a backtest Sharpe ratio without context.
+- the README now pairs Sharpe with walk-forward and out-of-sample predictive metrics
+- the dashboard labels cost-adjusted metrics and forecast horizon assumptions
+
+2. It does not annualize 5-day returns as if they were daily.
+- the risk layer now uses `252 / 5` periods per year
+
+3. It does not pretend one model is best because its filename says so.
+- the live engine now loads multiple production models and uses saved evaluation rankings to weight predictions
+
+4. It does not silently mix live data, saved artifacts, and placeholder values.
+- the dashboard now exposes provenance and avoids fake defaults for "last cycle" and performance summaries
+
+5. It does not benchmark itself against only one weak baseline.
+- the saved benchmark suite now includes equal-weight, momentum, and mean-reversion baselines on the same dates and horizon
+- the dashboard and API expose the strongest naive benchmark separately from the model ranking
+
+6. It now uses a confidence-aware neutral band instead of forcing every tiny prediction into a trade.
+- low-conviction signals are held flat rather than automatically converted into short exposure
+- the saved risk summary now reports both `Signal_Accuracy` and `Trade_Accuracy`
+
+## Running Locally
+
+### 1. Create and activate the virtual environment
+
 ```bash
-docker run -p 8501:8501 -e SERVICE_TYPE=dashboard leorigasaki535/stock-prediction-dashboard:latest
-```
-**Then visit:** http://localhost:8501
-
-### **REST API with Swagger Docs**
-```bash
-docker run -p 8000:8000 -e SERVICE_TYPE=api leorigasaki535/stock-prediction-api:latest
-```
-**Then visit:** http://localhost:8000/docs
-
-### **Complete System**
-```bash
-curl -O https://raw.githubusercontent.com/LeoRigasaki/Stock-Engine/main/docker-compose-public.yml
-docker-compose -f docker-compose-public.yml up
-```
-
-## 🎯 Project Overview
-
-A comprehensive, production-ready machine learning system designed to predict stock market movements using real-time data feeds, advanced feature engineering, and ensemble models. This project demonstrates end-to-end data science capabilities from data acquisition to containerized deployment.
-
-### 🔥 Key Achievements
-- **🏆 4.25 Sharpe Ratio** - Exceptional risk-adjusted returns
-- **⚡ <3 Second Predictions** - Real-time inference with confidence scoring
-- **🧠 73 Advanced Features** - Technical indicators and custom engineered features
-- **🤖 10+ ML Models** - XGBoost, LightGBM, Neural Network ensemble
-- **🐳 One-Command Deployment** - Professional Docker containerization
-- **📊 Interactive Dashboard** - Real-time predictions with portfolio optimization
-- **🔗 REST API** - Production-ready endpoints with authentication
-
-## 📊 System Performance
-
-| Metric | Value | Benchmark |
-|--------|-------|-----------|
-| **Sharpe Ratio** | 4.25 | Excellent (>2.0) |
-| **Annual Return** | 10-15% | Market Average ~10% |
-| **Win Rate** | 59-65% | Above Random (50%) |
-| **Max Drawdown** | <15% | Acceptable (<20%) |
-| **Prediction Speed** | <3 seconds | Real-time capable |
-| **API Response** | <500ms | Production ready |
-
-## 🛠 Technology Stack
-
-### **Machine Learning & Data Science**
-- **Python 3.11** - Core development language
-- **scikit-learn** - Classical ML algorithms and preprocessing
-- **XGBoost & LightGBM** - Gradient boosting with hyperparameter optimization
-- **Optuna** - Bayesian hyperparameter optimization
-- **pandas & NumPy** - Data manipulation and numerical computing
-- **TA-Lib** - Technical analysis indicators
-
-### **Web Framework & API**
-- **FastAPI** - High-performance REST API with automatic documentation
-- **Streamlit** - Interactive dashboard and real-time visualization
-- **Plotly** - Professional interactive charts and graphs
-- **Pydantic** - Data validation and serialization
-
-### **Data Sources & Real-time**
-- **yfinance** - Real-time market data fetching
-- **Kaggle API** - Historical dataset acquisition
-- **AsyncIO** - Asynchronous processing for real-time predictions
-
-### **Deployment & DevOps**
-- **Docker** - Containerization with multi-service architecture
-- **Docker Hub** - Public container registry hosting
-- **CORS & Security** - Production-ready security configuration
-
-## 📁 Architecture Overview
-
-```
-📦 Stock Market Prediction Engine
-├── 🧠 ML Pipeline
-│   ├── Data Acquisition (Kaggle API, yfinance)
-│   ├── Feature Engineering (73 technical indicators)
-│   ├── Model Training (XGBoost, LightGBM, Ensembles)
-│   └── Hyperparameter Optimization (Optuna)
-├── 🔗 REST API (FastAPI)
-│   ├── /predict - Multi-stock predictions
-│   ├── /portfolio/optimize - Portfolio optimization
-│   ├── /models/performance - Model metrics
-│   └── /alerts/active - Trading alerts
-├── 📊 Interactive Dashboard (Streamlit)
-│   ├── Live Predictions Interface
-│   ├── Performance Analytics
-│   ├── Portfolio Optimizer
-│   └── Risk Management Tools
-└── 🐳 Production Deployment
-    ├── Docker Containerization
-    ├── Health Monitoring
-    └── Auto-restart & Scaling
-```
-
-## 🎯 Features
-
-### **🔮 AI-Powered Predictions**
-- Real-time stock price predictions with confidence intervals
-- Multi-horizon forecasting (1-day, 5-day, 10-day)
-- Ensemble model combining XGBoost, LightGBM, and Neural Networks
-- Feature importance analysis and model interpretability
-
-### **💼 Portfolio Optimization**
-- Markowitz mean-variance optimization
-- Risk parity portfolio construction
-- Kelly Criterion position sizing
-- Monte Carlo simulation for risk assessment
-
-### **🚨 Risk Management**
-- Value at Risk (VaR) and Conditional VaR calculations
-- Maximum drawdown analysis and monitoring
-- Sharpe, Sortino, and Calmar ratio calculations
-- Automated alert system for high-risk positions
-
-### **📈 Interactive Dashboard**
-- Real-time prediction interface with live market data
-- Portfolio performance tracking and analytics
-- Risk metrics visualization and monitoring
-- Model performance comparison and insights
-
-### **🔗 Production API**
-- RESTful endpoints with comprehensive documentation
-- Authentication and rate limiting
-- Response caching for optimal performance
-- Health monitoring and error handling
-
-## 📊 Live Results & Interactive Visualizations
-
-### **🏆 Model Performance Analysis (4.25 Sharpe Ratio Achievement)**
-![Model Performance Dashboard](plots/day6_model_comparison.png)
-*Comprehensive comparison of 10+ ML models showing our ensemble achieving exceptional 4.25 Sharpe ratio*
-
-### **💼 Advanced Risk Management & Portfolio Optimization**
-![Risk Management Dashboard](plots/day11_risk_dashboard.png)
-*Professional risk analysis with VaR calculations, portfolio optimization, and Kelly Criterion position sizing*
-
-### **📈 Market Analysis & Pattern Recognition**
-![Market Analysis Dashboard](plots/day5_interactive_dashboard.png)
-*Statistical market analysis with regime detection, correlation analysis, and anomaly identification*
-
-### **🤖 Advanced ML Models & Hyperparameter Optimization**
-![Advanced Models Results](plots/day7_8_advanced_models.png)
-*XGBoost and LightGBM optimization results with Optuna hyperparameter tuning*
-
-### **🏛️ Ensemble Methods & Model Stacking**
-![Ensemble Analysis](plots/day9_ensemble_analysis.png)
-*Sophisticated model combination techniques achieving superior performance through ensemble methods*
-
-**🔗 Live Interactive Demos**: All visualizations are fully interactive with real-time data in our Docker deployment.
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- **Docker** installed on your system
-- **4GB+ RAM** for ML model loading
-- **Ports 8000 & 8501** available
-
-### Development Setup (Optional)
-```bash
-git clone https://github.com/LeoRigasaki/Stock-Engine.git
-cd Stock-Engine
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Local Development
+### 2. Start the backend
+
 ```bash
-docker-compose up
+venv/bin/python -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000
 ```
 
-## 📊 Usage Examples
+Open:
+- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-### **API Usage**
+### 3. Start the frontend
+
+```bash
+venv/bin/streamlit run src/streamlit_dashboard.py --server.port 8501 --server.address 127.0.0.1
+```
+
+Open:
+- Dashboard: [http://127.0.0.1:8501](http://127.0.0.1:8501)
+
+## API Example
+
 ```python
 import requests
 
-# Get stock predictions
-response = requests.post(
-    "http://localhost:8000/predict",
-    json={"symbols": ["AAPL", "AMZN", "NVDA"]},
-    headers={"Authorization": "Bearer demo_key_12345"}
-)
-predictions = response.json()
+headers = {"Authorization": "Bearer demo_key_12345"}
 
-# Optimize portfolio
-portfolio = requests.post(
-    "http://localhost:8000/portfolio/optimize",
-    json={
-        "symbols": ["AAPL", "AMZN", "NVDA", "MSFT"],
-        "optimization_method": "markowitz",
-        "target_return": 0.12
-    }
-)
+prediction = requests.post(
+    "http://127.0.0.1:8000/predict/detailed",
+    json={"symbols": ["AAPL", "NVDA", "MSFT"]},
+    headers=headers,
+    timeout=120,
+).json()
+
+performance = requests.get(
+    "http://127.0.0.1:8000/models/performance",
+    headers=headers,
+    timeout=30,
+).json()
 ```
 
-### **Dashboard Features**
-- **Live Predictions**: Real-time stock analysis with confidence scoring
-- **Portfolio Optimizer**: Interactive portfolio construction tools
-- **Performance Analytics**: Historical model performance tracking
-- **Risk Center**: Comprehensive risk management dashboard
-- **Model Insights**: Feature importance and model explanations
+## Methodology Notes
 
-## 📈 Model Performance
+### Target
+- the main regression target is `return_5d`
+- that means all risk and annualization logic should be interpreted on a 5-day horizon, not a 1-day horizon
 
-### **Ensemble Model Results**
-- **Primary Model**: Ensemble of XGBoost, LightGBM, Random Forest
-- **Training Data**: 307K+ records, 25 years of market data
-- **Validation Method**: Time-series cross-validation with walk-forward analysis
-- **Feature Selection**: 73 optimal features from 124 engineered indicators
+### Benchmarking
+- model metrics still use the equal-weight realized universe return over the same walk-forward dates as the direct benchmark reference
+- `data/processed/day11_benchmark_summary.csv` now adds a benchmark suite with:
+  - `EqualWeightLongOnly`
+  - `TopQuartileMomentum5D`
+  - `TopQuartileMomentum20D`
+  - `CrossSectionMomentum5D`
+  - `MeanReversion1D`
+- the README, API, and dashboard now report the best naive benchmark separately so the model has to clear a stronger hurdle
 
-### **Risk-Adjusted Performance**
-- **Sharpe Ratio**: 4.25 (exceptional performance)
-- **Information Ratio**: 2.1 (strong alpha generation)
-- **Maximum Drawdown**: 8.2% (controlled risk)
-- **Win Rate**: 62.3% (consistent profitability)
+### Transaction Costs
+- cost-adjusted metrics use a 10 bps per-period assumption in the saved risk summary
+- this is still a simplification and should not be treated as a full execution model
 
-## 🛡️ Security & Production Features
+### Live Inference
+- live predictions use a score-weighted ensemble across loaded production models
+- score weights come from the saved risk summary rather than a hardcoded model choice
 
-### **API Security**
-- JWT authentication with tiered access control
-- Rate limiting (60-300 requests/minute based on tier)
-- CORS configuration for frontend integration
-- Input validation with Pydantic models
+## Limitations
 
-### **Production Readiness**
-- Docker containerization with health checks
-- Automatic service restart on failure
-- Structured logging and error handling
-- Memory-optimized deployment (<2GB total)
+- `yfinance` is fine for prototyping but fragile for production use
+- saved validation artifacts and live inference are not a substitute for broker-connected live PnL
+- out-of-sample regression fit is weak, so this should not be sold as a fully proven forecasting edge
+- transaction costs are simplified and do not model slippage, spread, market impact, or turnover exactly
+- portfolio optimization still depends on model outputs whose economic interpretation should be stress-tested further
 
-## 📚 Documentation
+## Good Portfolio Talking Points
 
-- **API Documentation**: http://localhost:8000/docs (Interactive Swagger UI)
-- **Development History**: [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md)
+If you present this project in interviews or to clients, lead with:
+- end-to-end ML system design
+- time-aware validation and artifact management
+- ensemble inference with live API and dashboard delivery
+- risk analysis, portfolio construction, and signal monitoring
+- willingness to correct inflated metrics instead of hiding them
 
-## 🎓 Educational Value
+That last point matters. A realistic and defensible evaluation story is stronger than a flashy but fragile one.
 
-This project demonstrates:
-- **End-to-End ML Pipeline**: From data acquisition to production deployment
-- **Financial Engineering**: Technical analysis and quantitative finance
-- **Software Engineering**: Clean architecture, testing, and documentation
-- **DevOps Practices**: Containerization, API development, and deployment
-- **Data Science**: Feature engineering, model selection, and validation
+## Project Structure
 
-## 📊 Portfolio Impact
-
-### **Technical Skills Demonstrated**
-- Advanced machine learning with ensemble methods
-- Real-time data processing and feature engineering
-- RESTful API development with authentication
-- Interactive dashboard development
-- Professional containerization and deployment
-- Financial modeling and risk management
-
-### **Business Applications**
-- Quantitative trading strategy development
-- Portfolio optimization and risk management
-- Real-time market analysis and monitoring
-- Automated trading system foundation
-
-## 🤝 Professional Usage
-
-### **For Hiring Managers**
-```bash
-# One-command demo
-docker run -p 8501:8501 -e SERVICE_TYPE=dashboard leorigasaki535/stock-prediction-dashboard:latest
-# Visit http://localhost:8501 for interactive demo
+```text
+src/
+  api_server.py
+  realtime_prediction.py
+  risk_management.py
+  streamlit_dashboard.py
+  validation_framework.py
+data/
+  features/
+  processed/
+models/
+plots/
+tests/
+tools/
 ```
 
-### **For Technical Evaluation**
-- **GitHub Repository**: https://github.com/LeoRigasaki/Stock-Engine
-- **Docker Hub**: https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard
-- **Live API Demo**: http://localhost:8000/docs (after running API container)
+## Current Gaps Worth Improving Next
 
-## 📝 License and Disclaimer
+- replace `yfinance` with a more reliable market-data source
+- add explicit turnover-based transaction cost modeling
+- track experiments and model versions formally
+- add external SPY or sector-ETF benchmarks alongside the internal feature-driven benchmark suite
+- add a persistent prediction history store for live monitoring
 
-This project is for educational and portfolio demonstration purposes.
+## Verification
 
-**⚠️ Important Notice**: 
-- This is not financial advice
-- Past performance doesn't guarantee future results
-- Always consult with financial professionals before making investment decisions
-- Use this system at your own risk
-
-## 🔗 Links
-
-- **🐳 Docker Hub**: [leorigasaki535/stock-prediction-dashboard](https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard)
-- **📊 Interactive Demo**: `docker run -p 8501:8501 -e SERVICE_TYPE=dashboard leorigasaki535/stock-prediction-dashboard:latest`
-- **🔗 API Documentation**: `docker run -p 8000:8000 -e SERVICE_TYPE=api leorigasaki535/stock-prediction-api:latest`
-
----
-
-<div align="center">
-
-**⭐ Star this repository if you find it useful!**
-
-[![GitHub stars](https://img.shields.io/github/stars/LeoRigasaki/stock-market-prediction-engine?style=social)](https://github.com/LeoRigasaki/stock-market-prediction-engine)
-[![Docker Pulls](https://img.shields.io/docker/pulls/leorigasaki535/stock-prediction-dashboard)](https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard)
-
-**Built with fun for the data science and finance community**
-
-</div>
+Recent local verification:
+- `venv/bin/python -m unittest discover -s tests`
+- backend health and authenticated API checks
+- Streamlit runtime checks including live-scan path
+- regenerated `day11_risk_summary.csv`, `day11_benchmark_summary.csv`, and related artifacts after correcting the evaluation math and expanding the benchmark suite

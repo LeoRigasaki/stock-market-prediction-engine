@@ -31,6 +31,11 @@ class Config:
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
     VALIDATION_SIZE = 0.2
+    FORECAST_HORIZON_DAYS = int(os.getenv('FORECAST_HORIZON_DAYS', '5'))
+    TRADING_DAYS_PER_YEAR = int(os.getenv('TRADING_DAYS_PER_YEAR', '252'))
+    DEFAULT_TRANSACTION_COST_BPS = float(os.getenv('DEFAULT_TRANSACTION_COST_BPS', '10'))
+    DEFAULT_RISK_FREE_RATE = float(os.getenv('DEFAULT_RISK_FREE_RATE', '0.02'))
+    SIGNAL_THRESHOLD_MULTIPLIER = float(os.getenv('SIGNAL_THRESHOLD_MULTIPLIER', '1.5'))
     
     # Technical indicators periods
     TECHNICAL_INDICATORS = {
@@ -48,6 +53,27 @@ class Config:
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FILE = LOGS_PATH / 'stock_engine.log'
+
+    @classmethod
+    def periods_per_year(cls) -> float:
+        """Number of forecast periods in a trading year."""
+        horizon = max(cls.FORECAST_HORIZON_DAYS, 1)
+        return cls.TRADING_DAYS_PER_YEAR / horizon
+
+    @classmethod
+    def period_risk_free_rate(cls) -> float:
+        """Risk-free rate aligned to the forecast horizon."""
+        return cls.DEFAULT_RISK_FREE_RATE / cls.periods_per_year()
+
+    @classmethod
+    def signal_threshold_ratio(cls) -> float:
+        """Minimum expected return, in ratio space, required to justify a trade."""
+        return (cls.DEFAULT_TRANSACTION_COST_BPS / 10000.0) * cls.SIGNAL_THRESHOLD_MULTIPLIER
+
+    @classmethod
+    def signal_threshold_pct(cls) -> float:
+        """Minimum expected return, in percentage points, required to justify a trade."""
+        return cls.signal_threshold_ratio() * 100.0
     
     @classmethod
     def create_directories(cls):

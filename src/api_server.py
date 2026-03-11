@@ -123,6 +123,9 @@ class PredictionResponse(BaseModel):
     direction: str
     timestamp: str
     model_version: str
+    confidence_lower: Optional[float] = None
+    confidence_upper: Optional[float] = None
+    models_used: Optional[int] = None
 
 class PortfolioResponse(BaseModel):
     weights: Dict[str, float]
@@ -194,6 +197,11 @@ def get_cached_response(key: str) -> Optional[Any]:
             del api_cache[key]
     return None
 
+def normalize_percentage_metric(value: Any) -> float:
+    """Normalize values that may be stored either as ratios or percentages."""
+    numeric = float(value)
+    return numeric * 100 if abs(numeric) <= 1.5 else numeric
+
 async def validate_symbols(symbols: List[str]) -> List[str]:
     """Validate and clean stock symbols"""
     valid_symbols = []
@@ -203,6 +211,18 @@ async def validate_symbols(symbols: List[str]) -> List[str]:
         if len(symbol) <= 5 and symbol.isalpha():
             valid_symbols.append(symbol)
     return valid_symbols
+
+async def run_prediction_cycle_for_symbols(valid_symbols: List[str]) -> Dict[str, Any]:
+    """Execute a real-time prediction cycle for the requested symbols."""
+    global prediction_engine
+
+    original_stocks = prediction_engine.get_target_stocks
+
+    try:
+        prediction_engine.get_target_stocks = lambda: valid_symbols
+        return await prediction_engine.run_realtime_cycle()
+    finally:
+        prediction_engine.get_target_stocks = original_stocks
 
 # API Endpoints
 
@@ -222,7 +242,7 @@ async def health_check():
     """Health check endpoint"""
     global prediction_engine
     
-    uptime = time.time() - getattr(app.state, 'start_time', time.time())
+    uptime = max(0.0, time.time() - getattr(app.state, 'start_time', time.time()))
     
     return HealthResponse(
         status="healthy" if prediction_engine else "unhealthy",
@@ -261,15 +281,8 @@ async def predict_stocks(
         # Run prediction
         logger.info(f"🔮 Generating predictions for {len(valid_symbols)} symbols")
         
-        # Temporarily override target stocks for API call
-        original_stocks = prediction_engine.get_target_stocks
-        prediction_engine.get_target_stocks = lambda: valid_symbols
-        
         # Run prediction cycle
-        results = await prediction_engine.run_realtime_cycle()
-        
-        # Restore original method
-        prediction_engine.get_target_stocks = original_stocks
+        results = await run_prediction_cycle_for_symbols(valid_symbols)
         
         # Format response
         predictions = []
@@ -283,7 +296,10 @@ async def predict_stocks(
                 confidence=primary.get('confidence', 'medium'),
                 direction="BUY" if prediction_value > 0.001 else "SELL" if prediction_value < -0.001 else "HOLD",
                 timestamp=pred_data.get('timestamp', datetime.now().isoformat()),
-                model_version="ensemble_v1.0"
+                model_version="ensemble_v1.0",
+                confidence_lower=pred_data.get('confidence_interval', {}).get('lower'),
+                confidence_upper=pred_data.get('confidence_interval', {}).get('upper'),
+                models_used=pred_data.get('models_used')
             ))
         
         # Cache result
@@ -319,6 +335,34 @@ async def predict_single_stock(
         raise HTTPException(status_code=404, detail=f"No prediction available for {request.symbol}")
     
     return predictions[0]
+
+@app.post("/predict/detailed", response_model=Dict[str, Any])
+async def predict_stocks_detailed(
+    request: PredictionRequest,
+    current_user: dict = Depends(get_api_key)
+):
+    """Generate detailed predictions including alerts, drift status, and portfolio impact."""
+    global prediction_engine
+
+    check_rate_limit(current_user, max_requests=20)
+
+    if not prediction_engine:
+        raise HTTPException(status_code=503, detail="Prediction service unavailable")
+
+    try:
+        valid_symbols = await validate_symbols(request.symbols)
+        if not valid_symbols:
+            raise HTTPException(status_code=400, detail="No valid symbols provided")
+
+        results = await run_prediction_cycle_for_symbols(valid_symbols)
+        results['requested_symbols'] = valid_symbols
+        results['models_loaded'] = len(prediction_engine.models)
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Detailed prediction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Detailed prediction failed: {str(e)}")
 
 @app.post("/portfolio/optimize", response_model=PortfolioResponse)
 async def optimize_portfolio(
@@ -368,10 +412,15 @@ async def optimize_portfolio(
         predictions_df = risk_framework.generate_predictions(risk_framework.load_best_models(), X, df_filtered)
         
         # Run optimization
+        selected_method = request.optimization_method
         if request.optimization_method == "markowitz":
             result = risk_framework.portfolio_optimization_markowitz(
                 predictions_df, target_return=request.target_return
             )
+            if not result or not result.get('success', False):
+                logger.warning("Markowitz optimization failed, falling back to risk parity")
+                result = risk_framework.risk_parity_portfolio(predictions_df)
+                selected_method = "markowitz_fallback_risk_parity"
         else:  # risk_parity
             result = risk_framework.risk_parity_portfolio(predictions_df)
         
@@ -384,7 +433,7 @@ async def optimize_portfolio(
             expected_return=result.get('expected_return', result.get('portfolio_return', 0)),
             volatility=result.get('volatility', result.get('portfolio_volatility', 0)),
             sharpe_ratio=result.get('sharpe_ratio', 0),
-            optimization_method=request.optimization_method
+            optimization_method=selected_method
         )
         
         # Cache result
@@ -414,19 +463,65 @@ async def get_model_performance(current_user: dict = Depends(get_api_key)):
             raise HTTPException(status_code=404, detail="Performance data not available")
         
         risk_df = pd.read_csv(risk_summary_path)
-        
+        best_index = risk_df['Sharpe_Ratio'].idxmax()
+        benchmark_summary_path = config.PROCESSED_DATA_PATH / "day11_benchmark_summary.csv"
+        benchmark_df = (
+            pd.read_csv(benchmark_summary_path)
+            if benchmark_summary_path.exists()
+            else pd.DataFrame()
+        )
+        best_benchmark = None
+        if not benchmark_df.empty and 'Sharpe_Ratio' in benchmark_df.columns:
+            best_benchmark_index = benchmark_df['Sharpe_Ratio'].idxmax()
+            best_benchmark = benchmark_df.loc[best_benchmark_index].to_dict()
+
         # Convert to response format
         performance_data = {
             "models": risk_df.to_dict('records'),
-            "best_model": risk_df.loc[risk_df['Sharpe_Ratio'].idxmax()].to_dict(),
+            "best_model": risk_df.loc[best_index].to_dict(),
+            "benchmarks": benchmark_df.to_dict('records'),
+            "best_benchmark": best_benchmark,
             "summary": {
                 "total_models": len(risk_df),
+                "total_benchmarks": len(benchmark_df),
                 "avg_sharpe": risk_df['Sharpe_Ratio'].mean(),
                 "best_sharpe": risk_df['Sharpe_Ratio'].max(),
-                "avg_annual_return": risk_df['Annual_Return'].mean() * 100,
-                "avg_max_drawdown": risk_df['Max_Drawdown'].mean()
+                "avg_annual_return": risk_df['Annual_Return'].apply(normalize_percentage_metric).mean(),
+                "avg_max_drawdown": (
+                    risk_df['Max_Drawdown_Percent'].apply(normalize_percentage_metric).mean()
+                    if 'Max_Drawdown_Percent' in risk_df.columns
+                    else risk_df['Max_Drawdown'].apply(normalize_percentage_metric).mean()
+                ),
+                "avg_benchmark_annual_return": (
+                    risk_df['Benchmark_Annual_Return'].apply(normalize_percentage_metric).mean()
+                    if 'Benchmark_Annual_Return' in risk_df.columns else None
+                ),
+                "avg_signal_accuracy": (
+                    risk_df['Signal_Accuracy'].mean()
+                    if 'Signal_Accuracy' in risk_df.columns else None
+                ),
+                "forecast_horizon_days": (
+                    int(risk_df['Forecast_Horizon_Days'].iloc[0])
+                    if 'Forecast_Horizon_Days' in risk_df.columns else None
+                ),
+                "transaction_cost_bps": (
+                    float(risk_df['Transaction_Cost_Bps'].iloc[0])
+                    if 'Transaction_Cost_Bps' in risk_df.columns else None
+                ),
+                "best_benchmark_name": (
+                    best_benchmark.get('Benchmark')
+                    if best_benchmark else None
+                ),
+                "best_benchmark_sharpe": (
+                    float(best_benchmark.get('Sharpe_Ratio'))
+                    if best_benchmark else None
+                ),
+                "best_model_edge_vs_best_benchmark": (
+                    float(risk_df['Sharpe_Ratio'].max() - best_benchmark.get('Sharpe_Ratio'))
+                    if best_benchmark else None
+                ),
             },
-            "last_updated": datetime.now().isoformat()
+            "last_updated": datetime.fromtimestamp(risk_summary_path.stat().st_mtime).isoformat()
         }
         
         return performance_data

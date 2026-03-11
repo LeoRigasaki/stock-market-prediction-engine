@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import json
 
 from .config import Config
+from .consensus_model import ConsensusMetaEnsemble, load_model_scores
 
 class RiskManagementFramework:
     """Comprehensive Risk Management and Portfolio Optimization Framework"""
@@ -27,6 +28,68 @@ class RiskManagementFramework:
         self.risk_metrics = {}
         self.portfolio_returns = []
         self.position_sizes = {}
+
+    def periods_per_year(self) -> float:
+        """Number of forecast periods in a trading year."""
+        return self.config.periods_per_year()
+
+    def period_risk_free_rate(self) -> float:
+        """Risk-free rate aligned to the forecast horizon."""
+        return self.config.period_risk_free_rate()
+
+    def aggregate_period_returns(
+        self,
+        dates: pd.Series,
+        strategy_returns: np.ndarray,
+        benchmark_returns: np.ndarray,
+        transaction_cost_bps: Optional[float] = None,
+    ) -> pd.DataFrame:
+        """Aggregate row-level 5-day returns into a per-date evaluation series."""
+        cost_bps = (
+            self.config.DEFAULT_TRANSACTION_COST_BPS
+            if transaction_cost_bps is None else transaction_cost_bps
+        )
+        cost_rate = cost_bps / 10000
+
+        period_df = pd.DataFrame({
+            'Date': pd.to_datetime(dates),
+            'StrategyReturn': strategy_returns,
+            'BenchmarkReturn': benchmark_returns,
+        }).replace([np.inf, -np.inf], np.nan).dropna()
+
+        if period_df.empty:
+            return period_df
+
+        period_df = (
+            period_df.groupby('Date', as_index=False)[['StrategyReturn', 'BenchmarkReturn']]
+            .mean()
+            .sort_values('Date')
+        )
+        period_df['NetStrategyReturn'] = period_df['StrategyReturn'] - cost_rate
+        period_df['TransactionCostBps'] = cost_bps
+        return period_df
+
+    def normalize_return_array(self, returns: np.ndarray) -> np.ndarray:
+        """Normalize percentage-like return arrays into ratio space."""
+        arr = np.asarray(returns, dtype=float)
+        finite = arr[np.isfinite(arr)]
+
+        if len(finite) == 0:
+            return np.zeros_like(arr, dtype=float)
+
+        scale = 100.0 if np.nanpercentile(np.abs(finite), 95) > 1.5 else 1.0
+        return arr / scale
+
+    def prediction_positions(self, predictions: np.ndarray) -> np.ndarray:
+        """Convert continuous predictions into long/short/flat positions."""
+        normalized_predictions = self.normalize_return_array(predictions)
+        threshold = self.config.signal_threshold_ratio()
+        positions = np.where(
+            normalized_predictions > threshold,
+            1.0,
+            np.where(normalized_predictions < -threshold, -1.0, 0.0),
+        )
+        return positions
         
     def load_validation_results(self) -> Dict:
         """Load validation results from Day 10"""
@@ -95,6 +158,23 @@ class RiskManagementFramework:
                     logger.info(f"Loaded individual model: {name}")
                 except Exception as e:
                     logger.warning(f"Failed to load individual {name}: {e}")
+
+        consensus_components = {
+            name: model for name, model in models.items()
+            if name in {
+                'Ensemble_VotingRegressor',
+                'Ensemble_SimpleAverage',
+                'XGBoost',
+                'LightGBM',
+                'RandomForest',
+            }
+        }
+        if len(consensus_components) >= 2:
+            models['ConsensusMetaEnsemble'] = ConsensusMetaEnsemble(
+                consensus_components,
+                model_scores=load_model_scores(self.config),
+            )
+            logger.info("Loaded derived model: ConsensusMetaEnsemble")
         
         logger.info(f"Loaded {len(models)} models for portfolio optimization")
         return models
@@ -132,7 +212,11 @@ class RiskManagementFramework:
         """Generate predictions from all models"""
         logger.info("Generating predictions from all models...")
         
-        predictions_df = df[['Date', 'Ticker', 'Close', 'return_5d']].copy()
+        benchmark_cols = [
+            col for col in ['momentum_1d', 'momentum_5d', 'momentum_10d', 'momentum_20d', 'daily_return']
+            if col in df.columns
+        ]
+        predictions_df = df[['Date', 'Ticker', 'Close', 'return_5d', *benchmark_cols]].copy()
         
         for model_name, model in models.items():
             logger.info(f"Generating predictions with {model_name}...")
@@ -199,14 +283,27 @@ class RiskManagementFramework:
         """Calculate maximum drawdown and related metrics"""
         logger.info("Calculating maximum drawdown...")
         
-        # Calculate cumulative returns
-        cumulative_returns = np.cumsum(returns)
+        returns_clean = np.asarray(returns, dtype=float)
+        returns_clean = returns_clean[np.isfinite(returns_clean)]
+
+        if len(returns_clean) == 0:
+            return {
+                'max_drawdown': 0.0,
+                'max_drawdown_percent': 0.0,
+                'avg_drawdown': 0.0,
+                'recovery_time': 0,
+                'drawdown_periods': 0,
+                'max_drawdown_index': 0
+            }
+
+        # Calculate compounded equity curve from periodic returns
+        cumulative_returns = np.cumprod(1 + np.clip(returns_clean, -0.95, None))
         
         # Calculate running maximum
         peak = np.maximum.accumulate(cumulative_returns)
         
         # Calculate drawdowns
-        drawdowns = cumulative_returns - peak
+        drawdowns = (cumulative_returns / peak) - 1
         
         # Find maximum drawdown
         max_drawdown = np.min(drawdowns)
@@ -226,7 +323,7 @@ class RiskManagementFramework:
         
         drawdown_metrics = {
             'max_drawdown': max_drawdown,
-            'max_drawdown_percent': (max_drawdown / peak[max_drawdown_idx] * 100) if peak[max_drawdown_idx] != 0 else 0,
+            'max_drawdown_percent': max_drawdown * 100,
             'avg_drawdown': avg_drawdown,
             'recovery_time': recovery_time,
             'drawdown_periods': len(negative_drawdowns),
@@ -236,36 +333,105 @@ class RiskManagementFramework:
         logger.info(f"Max Drawdown: {max_drawdown:.4f} ({drawdown_metrics['max_drawdown_percent']:.2f}%)")
         return drawdown_metrics
     
-    def calculate_sharpe_sortino_ratios(self, returns: np.ndarray, risk_free_rate: float = 0.02) -> Dict[str, float]:
-        """Calculate Sharpe and Sortino ratios"""
+    def calculate_sharpe_sortino_ratios(
+        self,
+        returns: np.ndarray,
+        risk_free_rate: Optional[float] = None,
+        benchmark_returns: Optional[np.ndarray] = None,
+    ) -> Dict[str, float]:
+        """Calculate horizon-aware Sharpe, Sortino, and benchmark-relative metrics."""
         logger.info("Calculating Sharpe and Sortino ratios...")
-        
-        # Annualized risk-free rate to daily
-        daily_rf = risk_free_rate / 252
-        
+
+        periods_per_year = self.periods_per_year()
+        annual_risk_free_rate = (
+            self.config.DEFAULT_RISK_FREE_RATE if risk_free_rate is None else risk_free_rate
+        )
+        period_rf = annual_risk_free_rate / periods_per_year
+
+        returns = np.asarray(returns, dtype=float)
+        returns = returns[np.isfinite(returns)]
+
+        if len(returns) == 0:
+            return {
+                'sharpe_ratio': 0.0,
+                'sortino_ratio': 0.0,
+                'calmar_ratio': 0.0,
+                'annual_return': 0.0,
+                'annual_volatility': 0.0,
+                'period_rf_rate': period_rf,
+                'benchmark_annual_return': 0.0,
+                'benchmark_sharpe_ratio': 0.0,
+                'excess_annual_return': 0.0,
+                'information_ratio': 0.0,
+                'forecast_horizon_days': self.config.FORECAST_HORIZON_DAYS,
+                'periods_per_year': periods_per_year,
+            }
+
         # Calculate excess returns
-        excess_returns = returns - daily_rf
+        excess_returns = returns - period_rf
         
         # Sharpe ratio
-        sharpe_ratio = np.mean(excess_returns) / np.std(returns) * np.sqrt(252) if np.std(returns) != 0 else 0
+        return_std = np.std(returns)
+        sharpe_ratio = (
+            np.mean(excess_returns) / return_std * np.sqrt(periods_per_year)
+            if return_std != 0 else 0
+        )
         
         # Sortino ratio (downside deviation)
         downside_returns = excess_returns[excess_returns < 0]
-        downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else np.std(returns)
-        sortino_ratio = np.mean(excess_returns) / downside_deviation * np.sqrt(252) if downside_deviation != 0 else 0
+        downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else return_std
+        sortino_ratio = (
+            np.mean(excess_returns) / downside_deviation * np.sqrt(periods_per_year)
+            if downside_deviation != 0 else 0
+        )
         
         # Calmar ratio (annual return / max drawdown)
-        annual_return = np.mean(returns) * 252
+        annual_return = np.mean(returns) * periods_per_year
         max_dd = self.calculate_maximum_drawdown(returns)['max_drawdown']
         calmar_ratio = annual_return / abs(max_dd) if max_dd != 0 else 0
+
+        benchmark_annual_return = 0.0
+        benchmark_sharpe_ratio = 0.0
+        excess_annual_return = annual_return
+        information_ratio = 0.0
+
+        if benchmark_returns is not None:
+            benchmark_returns = np.asarray(benchmark_returns, dtype=float)
+            benchmark_returns = benchmark_returns[np.isfinite(benchmark_returns)]
+            min_length = min(len(returns), len(benchmark_returns))
+
+            if min_length > 1:
+                benchmark_returns = benchmark_returns[:min_length]
+                truncated_returns = returns[:min_length]
+                benchmark_excess = benchmark_returns - period_rf
+                benchmark_std = np.std(benchmark_returns)
+                benchmark_annual_return = np.mean(benchmark_returns) * periods_per_year
+                benchmark_sharpe_ratio = (
+                    np.mean(benchmark_excess) / benchmark_std * np.sqrt(periods_per_year)
+                    if benchmark_std != 0 else 0
+                )
+                excess_annual_return = annual_return - benchmark_annual_return
+
+                active_returns = truncated_returns - benchmark_returns
+                tracking_error = np.std(active_returns)
+                information_ratio = (
+                    np.mean(active_returns) / tracking_error * np.sqrt(periods_per_year)
+                    if tracking_error != 0 else 0
+                )
         
         ratios = {
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
             'calmar_ratio': calmar_ratio,
             'annual_return': annual_return,
-            'annual_volatility': np.std(returns) * np.sqrt(252),
-            'daily_rf_rate': daily_rf
+            'annual_volatility': return_std * np.sqrt(periods_per_year),
+            'period_rf_rate': period_rf,
+            'benchmark_annual_return': benchmark_annual_return,
+            'benchmark_sharpe_ratio': benchmark_sharpe_ratio,
+            'excess_annual_return': excess_annual_return,
+            'information_ratio': information_ratio,
+            'forecast_horizon_days': self.config.FORECAST_HORIZON_DAYS,
+            'periods_per_year': periods_per_year,
         }
         
         logger.info(f"Sharpe: {sharpe_ratio:.4f}, Sortino: {sortino_ratio:.4f}, Calmar: {calmar_ratio:.4f}")
@@ -277,7 +443,7 @@ class RiskManagementFramework:
         logger.info("Calculating position sizes using Kelly Criterion...")
         
         # Create binary win/loss based on predictions
-        predicted_direction = np.sign(predictions)
+        predicted_direction = self.prediction_positions(predictions)
         actual_direction = np.sign(actuals)
         
         # Calculate win rate and average win/loss
@@ -343,8 +509,8 @@ class RiskManagementFramework:
             stock_df = predictions_df[predictions_df['Ticker'] == stock].copy()
             if len(stock_df) >= 100:  # Increased minimum data requirement
                 stock_data[stock] = {
-                    'returns': stock_df['return_5d'].values,
-                    'predictions': stock_df[best_pred_col].values
+                    'returns': self.normalize_return_array(stock_df['return_5d'].values),
+                    'predictions': self.normalize_return_array(stock_df[best_pred_col].values),
                 }
         
         if len(stock_data) < 2:
@@ -368,9 +534,14 @@ class RiskManagementFramework:
         
         cov_matrix = np.cov(returns_matrix.T)
         
-        # Set target return if not provided
+        # Set target return if not provided and keep it in the feasible range
+        feasible_min = float(np.min(expected_returns))
+        feasible_max = float(np.max(expected_returns))
+
         if target_return is None:
-            target_return = np.mean(expected_returns)
+            target_return = float(np.median(expected_returns))
+        else:
+            target_return = float(np.clip(target_return, feasible_min, feasible_max))
         
         # Portfolio optimization objective function (minimize variance)
         def portfolio_variance(weights):
@@ -387,7 +558,7 @@ class RiskManagementFramework:
         # Constraints
         constraints = [
             {'type': 'eq', 'fun': weight_sum_constraint},
-            {'type': 'eq', 'fun': portfolio_return_constraint}
+            {'type': 'ineq', 'fun': portfolio_return_constraint}
         ]
         
         # Bounds (0 <= weight <= 1 for long-only portfolio)
@@ -396,6 +567,9 @@ class RiskManagementFramework:
         # Initial guess (equal weights)
         initial_guess = np.array([1.0 / n_assets] * n_assets)
         
+        # Add light diagonal regularization to keep the covariance matrix numerically stable
+        cov_matrix = cov_matrix + np.eye(n_assets) * 1e-6
+
         # Optimize
         try:
             result = minimize(portfolio_variance, initial_guess, 
@@ -414,7 +588,9 @@ class RiskManagementFramework:
                     'volatility': portfolio_volatility,
                     'sharpe_ratio': sharpe_ratio,
                     'target_return': target_return,
+                    'feasible_return_range': [feasible_min, feasible_max],
                     'success': True,
+                    'optimization_method': 'markowitz',
                     'optimization_message': result.message
                 }
                 
@@ -426,6 +602,42 @@ class RiskManagementFramework:
                 return optimization_results
                 
             else:
+                logger.warning(f"Primary Markowitz optimization failed: {result.message}")
+
+                def negative_sharpe(weights):
+                    portfolio_return = np.dot(weights, expected_returns)
+                    portfolio_volatility = np.sqrt(max(portfolio_variance(weights), 1e-12))
+                    return -(portfolio_return / portfolio_volatility)
+
+                fallback_result = minimize(
+                    negative_sharpe,
+                    initial_guess,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=[{'type': 'eq', 'fun': weight_sum_constraint}]
+                )
+
+                if fallback_result.success:
+                    optimal_weights = fallback_result.x
+                    portfolio_return = np.dot(optimal_weights, expected_returns)
+                    portfolio_volatility = np.sqrt(portfolio_variance(optimal_weights))
+                    sharpe_ratio = portfolio_return / portfolio_volatility if portfolio_volatility != 0 else 0
+
+                    logger.info("Markowitz fallback to max-Sharpe optimization succeeded")
+                    return {
+                        'stocks': stocks,
+                        'weights': optimal_weights,
+                        'expected_return': portfolio_return,
+                        'volatility': portfolio_volatility,
+                        'sharpe_ratio': sharpe_ratio,
+                        'target_return': target_return,
+                        'feasible_return_range': [feasible_min, feasible_max],
+                        'success': True,
+                        'optimization_method': 'markowitz_max_sharpe_fallback',
+                        'optimization_message': fallback_result.message,
+                        'fallback_reason': result.message
+                    }
+
                 logger.error(f"Portfolio optimization failed: {result.message}")
                 return {'success': False, 'message': result.message}
                 
@@ -453,7 +665,7 @@ class RiskManagementFramework:
         for stock in stocks:
             stock_df = predictions_df[predictions_df['Ticker'] == stock]
             if len(stock_df) >= 100:  # Increased minimum requirement
-                returns = stock_df['return_5d'].values
+                returns = self.normalize_return_array(stock_df['return_5d'].values)
                 volatility = np.std(returns)
                 if volatility > 0:  # Only include stocks with non-zero volatility
                     stock_volatilities[stock] = volatility
@@ -477,10 +689,13 @@ class RiskManagementFramework:
         expected_returns = []
         for stock in stocks_list:
             stock_df = predictions_df[predictions_df['Ticker'] == stock]
-            expected_returns.append(np.mean(stock_df[best_pred_col]))
+            expected_returns.append(np.mean(self.normalize_return_array(stock_df[best_pred_col].values)))
         
         portfolio_return = np.dot(weights_array, expected_returns)
-        portfolio_volatility = np.sqrt(np.dot(weights_array, [stock_volatilities[stock] for stock in stocks_list]))
+        min_length = min(len(stock_returns_data[stock]) for stock in stocks_list)
+        returns_matrix = np.array([stock_returns_data[stock][:min_length] for stock in stocks_list]).T
+        cov_matrix = np.cov(returns_matrix.T) + np.eye(len(stocks_list)) * 1e-6
+        portfolio_volatility = np.sqrt(np.dot(weights_array.T, np.dot(cov_matrix, weights_array)))
         
         risk_parity_results = {
             'stocks': stocks_list,
@@ -489,7 +704,9 @@ class RiskManagementFramework:
             'individual_volatilities': stock_volatilities,
             'portfolio_return': portfolio_return,
             'portfolio_volatility': portfolio_volatility,
-            'sharpe_ratio': portfolio_return / portfolio_volatility if portfolio_volatility != 0 else 0
+            'sharpe_ratio': portfolio_return / portfolio_volatility if portfolio_volatility != 0 else 0,
+            'success': True,
+            'optimization_method': 'risk_parity'
         }
         
         logger.info(f"Risk parity portfolio created with {len(stocks_list)} stocks")
@@ -526,6 +743,175 @@ class RiskManagementFramework:
         
         logger.info(f"Transaction costs: ${total_costs:.2f} ({cost_percentage:.4f}% of portfolio)")
         return transaction_metrics
+
+    def analysis_model_names(self, analysis_results: Dict[str, Any]) -> List[str]:
+        """Return only model result keys from the analysis payload."""
+        excluded = {'portfolios', 'best_strategy', 'benchmarks'}
+        return [name for name in analysis_results.keys() if name not in excluded]
+
+    def _benchmark_period_returns(
+        self,
+        predictions_df: pd.DataFrame,
+        ranking_col: Optional[str] = None,
+        *,
+        top_quantile: float = 0.25,
+        long_short: bool = False,
+        reverse: bool = False,
+        transaction_cost_bps: float = 0.0,
+    ) -> pd.DataFrame:
+        """Build per-date benchmark returns from cross-sectional rules."""
+        benchmark_df = predictions_df[['Date', 'Ticker', 'return_5d']].copy()
+        benchmark_df['ActualReturn'] = self.normalize_return_array(benchmark_df['return_5d'].values)
+
+        if ranking_col is not None:
+            benchmark_df[ranking_col] = predictions_df[ranking_col].fillna(0).values
+
+        period_rows: List[Dict[str, Any]] = []
+        cost_rate = transaction_cost_bps / 10000.0
+
+        for date, group in benchmark_df.groupby('Date'):
+            if group.empty:
+                continue
+
+            universe_return = float(group['ActualReturn'].mean())
+            universe_size = len(group)
+            bucket_size = max(1, int(np.ceil(universe_size * top_quantile)))
+
+            if ranking_col is None:
+                strategy_return = universe_return
+                signal_coverage = 100.0
+            else:
+                ranked = group.sort_values(ranking_col, ascending=reverse)
+                long_slice = ranked.head(bucket_size)
+                long_return = float(long_slice['ActualReturn'].mean())
+
+                if long_short and universe_size > 1:
+                    short_ranked = group.sort_values(ranking_col, ascending=not reverse)
+                    short_slice = short_ranked.head(bucket_size)
+                    short_return = float(short_slice['ActualReturn'].mean())
+                    strategy_return = long_return - short_return
+                    signal_coverage = min(100.0, 200.0 * bucket_size / universe_size)
+                else:
+                    strategy_return = long_return
+                    signal_coverage = 100.0 * bucket_size / universe_size
+
+            period_rows.append({
+                'Date': pd.to_datetime(date),
+                'StrategyReturn': strategy_return,
+                'BenchmarkReturn': universe_return,
+                'NetStrategyReturn': strategy_return - cost_rate,
+                'SignalCoverage': signal_coverage,
+                'TransactionCostBps': transaction_cost_bps,
+            })
+
+        if not period_rows:
+            return pd.DataFrame()
+
+        return pd.DataFrame(period_rows).sort_values('Date').reset_index(drop=True)
+
+    def _evaluate_benchmark(
+        self,
+        benchmark_name: str,
+        description: str,
+        period_returns: pd.DataFrame,
+        *,
+        strategy_type: str,
+        signal_source: str,
+    ) -> Dict[str, Any]:
+        """Convert benchmark return series into the common evaluation schema."""
+        net_returns = period_returns['NetStrategyReturn'].values
+        benchmark_returns = period_returns['BenchmarkReturn'].values
+
+        return {
+            'name': benchmark_name,
+            'description': description,
+            'strategy_type': strategy_type,
+            'signal_source': signal_source,
+            'performance_ratios': self.calculate_sharpe_sortino_ratios(
+                net_returns,
+                benchmark_returns=benchmark_returns,
+            ),
+            'drawdown_metrics': self.calculate_maximum_drawdown(net_returns),
+            'win_rate': float(np.mean(net_returns > 0) * 100),
+            'signal_coverage': float(period_returns['SignalCoverage'].mean()),
+            'transaction_cost_bps': float(period_returns['TransactionCostBps'].iloc[0]),
+            'observations': int(len(period_returns)),
+            'total_return': float(np.sum(net_returns)),
+        }
+
+    def build_benchmark_suite(self, predictions_df: pd.DataFrame) -> Dict[str, Any]:
+        """Build defensible cross-sectional benchmarks on the same dates and horizon."""
+        logger.info("Building benchmark suite...")
+        benchmark_results: Dict[str, Any] = {}
+
+        equal_weight_periods = self._benchmark_period_returns(predictions_df)
+        if not equal_weight_periods.empty:
+            benchmark_results['EqualWeightLongOnly'] = self._evaluate_benchmark(
+                'EqualWeightLongOnly',
+                'Passive equal-weight long-only universe benchmark',
+                equal_weight_periods,
+                strategy_type='long_only',
+                signal_source='equal_weight',
+            )
+
+        benchmark_specs = [
+            (
+                'TopQuartileMomentum5D',
+                'Long-only top quartile by 5-day momentum',
+                'momentum_5d',
+                False,
+                False,
+                self.config.DEFAULT_TRANSACTION_COST_BPS,
+            ),
+            (
+                'TopQuartileMomentum20D',
+                'Long-only top quartile by 20-day momentum',
+                'momentum_20d',
+                False,
+                False,
+                self.config.DEFAULT_TRANSACTION_COST_BPS,
+            ),
+            (
+                'CrossSectionMomentum5D',
+                'Long top quartile and short bottom quartile by 5-day momentum',
+                'momentum_5d',
+                True,
+                False,
+                self.config.DEFAULT_TRANSACTION_COST_BPS * 2,
+            ),
+            (
+                'MeanReversion1D',
+                'Long worst 1-day losers and short best 1-day winners',
+                'daily_return',
+                True,
+                True,
+                self.config.DEFAULT_TRANSACTION_COST_BPS * 2,
+            ),
+        ]
+
+        for benchmark_name, description, column, long_short, reverse, cost_bps in benchmark_specs:
+            if column not in predictions_df.columns:
+                continue
+
+            period_returns = self._benchmark_period_returns(
+                predictions_df,
+                ranking_col=column,
+                long_short=long_short,
+                reverse=reverse,
+                transaction_cost_bps=cost_bps,
+            )
+            if period_returns.empty:
+                continue
+
+            benchmark_results[benchmark_name] = self._evaluate_benchmark(
+                benchmark_name,
+                description,
+                period_returns,
+                strategy_type='long_short' if long_short else 'long_only',
+                signal_source=column,
+            )
+
+        return benchmark_results
     
     def comprehensive_risk_analysis(self, predictions_df: pd.DataFrame, models: Dict) -> Dict[str, Any]:
         """Run comprehensive risk analysis for all models and strategies"""
@@ -539,37 +925,72 @@ class RiskManagementFramework:
         
         for pred_col in pred_cols:
             model_name = pred_col.replace('pred_', '')
-            predictions = predictions_df[pred_col].values
-            actuals = predictions_df['return_5d'].values
+            predictions = self.normalize_return_array(predictions_df[pred_col].values)
+            actuals = self.normalize_return_array(predictions_df['return_5d'].values)
             
             # Calculate strategy returns (simple long/short based on predictions)
-            strategy_returns = np.where(predictions > 0, actuals, -actuals)
+            positions = self.prediction_positions(predictions)
+            strategy_returns = positions * actuals
+            period_returns = self.aggregate_period_returns(
+                predictions_df['Date'],
+                strategy_returns,
+                actuals,
+            )
+
+            if period_returns.empty:
+                logger.warning(f"No valid period returns for {model_name}")
+                continue
+
+            gross_period_returns = period_returns['StrategyReturn'].values
+            net_period_returns = period_returns['NetStrategyReturn'].values
+            benchmark_period_returns = period_returns['BenchmarkReturn'].values
             
             # Risk metrics
-            var_metrics = self.calculate_value_at_risk(strategy_returns)
-            drawdown_metrics = self.calculate_maximum_drawdown(strategy_returns)
-            ratio_metrics = self.calculate_sharpe_sortino_ratios(strategy_returns)
+            var_metrics = self.calculate_value_at_risk(net_period_returns)
+            drawdown_metrics = self.calculate_maximum_drawdown(net_period_returns)
+            ratio_metrics = self.calculate_sharpe_sortino_ratios(
+                net_period_returns,
+                benchmark_returns=benchmark_period_returns,
+            )
+            gross_ratio_metrics = self.calculate_sharpe_sortino_ratios(
+                gross_period_returns,
+                benchmark_returns=benchmark_period_returns,
+            )
             position_metrics = self.position_sizing_kelly_criterion(predictions, actuals)
+            traded_mask = positions != 0
+            trade_accuracy = (
+                float(np.mean(np.sign(positions[traded_mask]) == np.sign(actuals[traded_mask])) * 100)
+                if np.any(traded_mask) else 0.0
+            )
             
             analysis_results[model_name] = {
                 'var_metrics': var_metrics,
                 'drawdown_metrics': drawdown_metrics,
                 'performance_ratios': ratio_metrics,
+                'gross_performance_ratios': gross_ratio_metrics,
                 'position_sizing': position_metrics,
-                'total_return': np.sum(strategy_returns),
-                'win_rate': np.mean(strategy_returns > 0) * 100,
-                'avg_return': np.mean(strategy_returns)
+                'total_return': float(np.sum(net_period_returns)),
+                'gross_total_return': float(np.sum(gross_period_returns)),
+                'win_rate': float(np.mean(net_period_returns > 0) * 100),
+                'avg_return': float(np.mean(net_period_returns)),
+                'signal_accuracy': float(np.mean(np.sign(positions) == np.sign(actuals)) * 100),
+                'trade_accuracy': trade_accuracy,
+                'trade_rate': float(np.mean(positions != 0) * 100),
+                'transaction_cost_bps': self.config.DEFAULT_TRANSACTION_COST_BPS,
+                'forecast_horizon_days': self.config.FORECAST_HORIZON_DAYS,
             }
         
         # 2. Portfolio Optimization
         logger.info("2. Performing portfolio optimization...")
         markowitz_portfolio = self.portfolio_optimization_markowitz(predictions_df)
         risk_parity_portfolio = self.risk_parity_portfolio(predictions_df)
-        
+        benchmark_results = self.build_benchmark_suite(predictions_df)
+
         analysis_results['portfolios'] = {
             'markowitz': markowitz_portfolio,
             'risk_parity': risk_parity_portfolio
         }
+        analysis_results['benchmarks'] = benchmark_results
         
         # 3. Best Strategy Selection
         logger.info("3. Identifying best risk-adjusted strategy...")
@@ -577,7 +998,7 @@ class RiskManagementFramework:
         best_sharpe = -999
         
         for model_name, metrics in analysis_results.items():
-            if model_name != 'portfolios':
+            if model_name not in ['portfolios', 'benchmarks']:
                 sharpe = metrics['performance_ratios']['sharpe_ratio']
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
@@ -615,7 +1036,7 @@ class RiskManagementFramework:
         )
         
         # Extract model data
-        model_names = [name for name in analysis_results.keys() if name not in ['portfolios', 'best_strategy']]
+        model_names = self.analysis_model_names(analysis_results)
         
         # 1. Sharpe Ratios
         sharpe_ratios = [analysis_results[name]['performance_ratios']['sharpe_ratio'] for name in model_names]
@@ -695,27 +1116,18 @@ class RiskManagementFramework:
             row=3, col=1
         )
         
-        # 8. Cumulative Performance (first model as example)
+        # 8. Total Returns by Model
         if model_names:
-            # Create sample cumulative performance for demonstration
-            time_periods = list(range(100))
-            for i, model_name in enumerate(model_names[:3]):  # Show top 3 models
-                # Generate sample cumulative returns based on actual metrics
-                annual_return = analysis_results[model_name]['performance_ratios']['annual_return']
-                volatility = analysis_results[model_name]['performance_ratios']['annual_volatility']
-                
-                # Simulate daily returns
-                daily_return = annual_return / 252
-                daily_vol = volatility / np.sqrt(252)
-                simulated_returns = np.random.normal(daily_return, daily_vol, 100)
-                cumulative_returns = np.cumsum(simulated_returns)
-                
-                fig.add_trace(
-                    go.Scatter(x=time_periods, y=cumulative_returns,
-                              name=f'{model_name} Cumulative',
-                              line=dict(width=2)),
-                    row=3, col=2
-                )
+            total_returns = [analysis_results[name].get('total_return', 0) for name in model_names]
+            fig.add_trace(
+                go.Bar(
+                    x=model_names,
+                    y=total_returns,
+                    name='Total Return',
+                    marker_color='teal'
+                ),
+                row=3, col=2
+            )
         
         # 9. Risk Metrics Summary Table
         summary_text = ["RISK METRICS SUMMARY:", ""]
@@ -724,6 +1136,18 @@ class RiskManagementFramework:
             summary_text.append(f"Best Strategy: {best_strategy.get('name', 'N/A')}")
             summary_text.append(f"Best Sharpe: {best_strategy.get('sharpe_ratio', 0):.3f}")
             summary_text.append("")
+
+            benchmark_results = analysis_results.get('benchmarks', {})
+            if benchmark_results:
+                best_benchmark_name, best_benchmark = max(
+                    benchmark_results.items(),
+                    key=lambda item: item[1]['performance_ratios']['sharpe_ratio']
+                )
+                summary_text.append(f"Best Benchmark: {best_benchmark_name}")
+                summary_text.append(
+                    f"  Sharpe: {best_benchmark['performance_ratios']['sharpe_ratio']:.3f}"
+                )
+                summary_text.append("")
             
             for model in model_names[:5]:  # Top 5 models
                 metrics = analysis_results[model]
@@ -772,7 +1196,7 @@ class RiskManagementFramework:
         saved_files['risk_analysis'] = str(analysis_path)
         
         # 2. Save risk metrics summary
-        model_names = [name for name in analysis_results.keys() if name not in ['portfolios', 'best_strategy']]
+        model_names = self.analysis_model_names(analysis_results)
         
         risk_summary_data = []
         for model_name in model_names:
@@ -781,17 +1205,29 @@ class RiskManagementFramework:
             summary_row = {
                 'Model': model_name,
                 'Sharpe_Ratio': metrics['performance_ratios']['sharpe_ratio'],
+                'Gross_Sharpe_Ratio': metrics['gross_performance_ratios']['sharpe_ratio'],
                 'Sortino_Ratio': metrics['performance_ratios']['sortino_ratio'],
                 'Calmar_Ratio': metrics['performance_ratios']['calmar_ratio'],
                 'Annual_Return': metrics['performance_ratios']['annual_return'],
+                'Gross_Annual_Return': metrics['gross_performance_ratios']['annual_return'],
                 'Annual_Volatility': metrics['performance_ratios']['annual_volatility'],
+                'Benchmark_Annual_Return': metrics['performance_ratios']['benchmark_annual_return'],
+                'Benchmark_Sharpe_Ratio': metrics['performance_ratios']['benchmark_sharpe_ratio'],
+                'Excess_Annual_Return': metrics['performance_ratios']['excess_annual_return'],
+                'Information_Ratio': metrics['performance_ratios']['information_ratio'],
                 'VaR_95': metrics['var_metrics']['var_historical'],
                 'CVaR_95': metrics['var_metrics']['cvar'],
                 'Max_Drawdown': metrics['drawdown_metrics']['max_drawdown'],
                 'Max_Drawdown_Percent': metrics['drawdown_metrics']['max_drawdown_percent'],
                 'Win_Rate': metrics['win_rate'],
+                'Signal_Accuracy': metrics.get('signal_accuracy', 0),
+                'Trade_Accuracy': metrics.get('trade_accuracy', 0),
+                'Trade_Rate': metrics.get('trade_rate', 0),
                 'Kelly_Position_Size': metrics['position_sizing']['optimal_position'],
-                'Total_Return': metrics['total_return']
+                'Total_Return': metrics['total_return'],
+                'Gross_Total_Return': metrics.get('gross_total_return', metrics['total_return']),
+                'Forecast_Horizon_Days': metrics.get('forecast_horizon_days', self.config.FORECAST_HORIZON_DAYS),
+                'Transaction_Cost_Bps': metrics.get('transaction_cost_bps', self.config.DEFAULT_TRANSACTION_COST_BPS),
             }
             risk_summary_data.append(summary_row)
         
@@ -799,6 +1235,39 @@ class RiskManagementFramework:
         risk_summary_path = self.config.PROCESSED_DATA_PATH / "day11_risk_summary.csv"
         risk_summary_df.to_csv(risk_summary_path, index=False)
         saved_files['risk_summary'] = str(risk_summary_path)
+
+        benchmark_results = analysis_results.get('benchmarks', {})
+        if benchmark_results:
+            benchmark_rows = []
+            for benchmark_name, metrics in benchmark_results.items():
+                benchmark_rows.append({
+                    'Benchmark': benchmark_name,
+                    'Description': metrics.get('description', ''),
+                    'Strategy_Type': metrics.get('strategy_type', ''),
+                    'Signal_Source': metrics.get('signal_source', ''),
+                    'Sharpe_Ratio': metrics['performance_ratios']['sharpe_ratio'],
+                    'Sortino_Ratio': metrics['performance_ratios']['sortino_ratio'],
+                    'Calmar_Ratio': metrics['performance_ratios']['calmar_ratio'],
+                    'Annual_Return': metrics['performance_ratios']['annual_return'],
+                    'Annual_Volatility': metrics['performance_ratios']['annual_volatility'],
+                    'Benchmark_Annual_Return': metrics['performance_ratios']['benchmark_annual_return'],
+                    'Benchmark_Sharpe_Ratio': metrics['performance_ratios']['benchmark_sharpe_ratio'],
+                    'Excess_Annual_Return': metrics['performance_ratios']['excess_annual_return'],
+                    'Information_Ratio': metrics['performance_ratios']['information_ratio'],
+                    'Max_Drawdown': metrics['drawdown_metrics']['max_drawdown'],
+                    'Max_Drawdown_Percent': metrics['drawdown_metrics']['max_drawdown_percent'],
+                    'Win_Rate': metrics['win_rate'],
+                    'Signal_Coverage': metrics.get('signal_coverage', 0),
+                    'Observations': metrics.get('observations', 0),
+                    'Total_Return': metrics.get('total_return', 0),
+                    'Forecast_Horizon_Days': metrics['performance_ratios']['forecast_horizon_days'],
+                    'Transaction_Cost_Bps': metrics.get('transaction_cost_bps', 0),
+                })
+
+            benchmark_summary_df = pd.DataFrame(benchmark_rows).sort_values('Sharpe_Ratio', ascending=False)
+            benchmark_summary_path = self.config.PROCESSED_DATA_PATH / "day11_benchmark_summary.csv"
+            benchmark_summary_df.to_csv(benchmark_summary_path, index=False)
+            saved_files['benchmark_summary'] = str(benchmark_summary_path)
         
         # 3. Save portfolio optimization results
         if 'portfolios' in analysis_results:
@@ -854,9 +1323,29 @@ class RiskManagementFramework:
             'best_strategy': analysis_results.get('best_strategy', {}),
             'risk_management_summary': {
                 'highest_sharpe': max([analysis_results[name]['performance_ratios']['sharpe_ratio'] for name in model_names]),
+                'highest_gross_sharpe': max([analysis_results[name]['gross_performance_ratios']['sharpe_ratio'] for name in model_names]),
                 'lowest_var': min([analysis_results[name]['var_metrics']['var_historical'] for name in model_names]),
                 'lowest_drawdown': max([analysis_results[name]['drawdown_metrics']['max_drawdown'] for name in model_names]),  # max because drawdowns are negative
-                'highest_win_rate': max([analysis_results[name]['win_rate'] for name in model_names])
+                'highest_win_rate': max([analysis_results[name]['win_rate'] for name in model_names]),
+                'forecast_horizon_days': self.config.FORECAST_HORIZON_DAYS,
+                'transaction_cost_bps': self.config.DEFAULT_TRANSACTION_COST_BPS,
+            },
+            'benchmark_summary': {
+                'benchmarks_analyzed': len(benchmark_results),
+                'best_benchmark': (
+                    max(
+                        benchmark_results.items(),
+                        key=lambda item: item[1]['performance_ratios']['sharpe_ratio']
+                    )[0]
+                    if benchmark_results else None
+                ),
+                'best_benchmark_sharpe': (
+                    max(
+                        metrics['performance_ratios']['sharpe_ratio']
+                        for metrics in benchmark_results.values()
+                    )
+                    if benchmark_results else None
+                ),
             },
             'portfolio_optimization': {
                 'markowitz_successful': 'markowitz' in analysis_results.get('portfolios', {}) and analysis_results['portfolios']['markowitz'].get('success', False),
@@ -878,7 +1367,7 @@ class RiskManagementFramework:
         """Generate practical risk management recommendations"""
         recommendations = []
         
-        model_names = [name for name in analysis_results.keys() if name not in ['portfolios', 'best_strategy']]
+        model_names = self.analysis_model_names(analysis_results)
         
         if not model_names:
             return ["Insufficient data for recommendations"]
@@ -887,6 +1376,18 @@ class RiskManagementFramework:
         best_strategy = analysis_results.get('best_strategy', {})
         if best_strategy:
             recommendations.append(f"Primary Strategy: Use {best_strategy.get('name', 'N/A')} model (Sharpe: {best_strategy.get('sharpe_ratio', 0):.3f})")
+
+        benchmark_results = analysis_results.get('benchmarks', {})
+        if benchmark_results:
+            best_benchmark_name, best_benchmark = max(
+                benchmark_results.items(),
+                key=lambda item: item[1]['performance_ratios']['sharpe_ratio']
+            )
+            benchmark_sharpe = best_benchmark['performance_ratios']['sharpe_ratio']
+            edge = best_strategy.get('sharpe_ratio', 0) - benchmark_sharpe
+            recommendations.append(
+                f"Benchmark hurdle: best naive baseline is {best_benchmark_name} (Sharpe: {benchmark_sharpe:.3f}); current model edge is {edge:.3f}"
+            )
         
         # Risk level assessment
         avg_sharpe = np.mean([analysis_results[name]['performance_ratios']['sharpe_ratio'] for name in model_names])
@@ -986,7 +1487,8 @@ class RiskManagementFramework:
             'analysis_results': analysis_results,
             'saved_files': saved_files,
             'summary': {
-                'models_analyzed': len([k for k in analysis_results.keys() if k not in ['portfolios', 'best_strategy']]),
+                'models_analyzed': len(self.analysis_model_names(analysis_results)),
+                'benchmarks_analyzed': len(analysis_results.get('benchmarks', {})),
                 'best_strategy': analysis_results.get('best_strategy', {}),
                 'portfolios_created': len(analysis_results.get('portfolios', {})),
                 'risk_recommendations': self._generate_risk_recommendations(analysis_results)

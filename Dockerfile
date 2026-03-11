@@ -9,11 +9,13 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV STOCK_ENGINE_API_KEY=demo_key_12345
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
@@ -29,20 +31,12 @@ COPY models/advanced/ ./models/advanced/
 COPY models/regression_random_forest.joblib ./models/
 COPY models/feature_scaler.joblib ./models/
 
-# Copy essential data files (not raw datasets)
-COPY data/processed/target_stocks.txt ./data/processed/
-COPY data/processed/day11_risk_summary.csv ./data/processed/
-COPY data/processed/day10_validation_summary.csv ./data/processed/
-COPY data/processed/day11_risk_analysis.json ./data/processed/
-COPY data/features/selected_features.csv ./data/features/
-COPY data/features/selected_features_list.txt ./data/features/
-COPY data/features/model_ready_features.txt ./data/features/
+# Copy processed/runtime artifacts used by API and dashboard
+COPY data/processed/ ./data/processed/
+COPY data/features/ ./data/features/
 
 # Create necessary directories
 RUN mkdir -p logs plots data/processed data/features
-
-# Copy configuration
-COPY src/config.py ./src/
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
@@ -60,9 +54,6 @@ fi' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || curl -f http://localhost:8501 || exit 1
-
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Expose ports
 EXPOSE 8000 8501
