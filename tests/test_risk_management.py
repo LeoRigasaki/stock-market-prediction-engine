@@ -1,9 +1,11 @@
 import unittest
 
 import numpy as np
+import pandas as pd
 
 from src.consensus_model import ConsensusMetaEnsemble
 from src.risk_management import RiskManagementFramework
+from tests.fixture_data import ensure_test_artifacts
 
 
 class ConstantModel:
@@ -14,15 +16,38 @@ class ConstantModel:
         return np.full(len(X), self.value, dtype=float)
 
 
+class LinearFeatureModel:
+    def __init__(self, weights, bias=0.0):
+        self.weights = weights
+        self.bias = bias
+
+    def predict(self, X):
+        frame = X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+        prediction = np.full(len(frame), self.bias, dtype=float)
+        for column, weight in self.weights.items():
+            prediction += frame[column].to_numpy(dtype=float) * weight
+        return prediction
+
+
 class RiskManagementSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        ensure_test_artifacts()
         cls.framework = RiskManagementFramework()
         feature_df = cls.framework.load_feature_data()
         cls.filtered = feature_df[feature_df['Ticker'].isin(['AAPL', 'NVDA', 'MSFT'])].copy()
         cls.features, _, _ = cls.framework.prepare_portfolio_data(cls.filtered)
         cls.predictions = cls.framework.generate_predictions(
-            cls.framework.load_best_models(),
+            {
+                'FixtureSignal': LinearFeatureModel(
+                    {
+                        'momentum_5d': 0.75,
+                        'momentum_20d': 0.45,
+                        'daily_return': 0.35,
+                    },
+                    bias=0.0015,
+                )
+            },
             cls.features,
             cls.filtered,
         )

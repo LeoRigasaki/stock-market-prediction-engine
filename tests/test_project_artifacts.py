@@ -6,10 +6,15 @@ import numpy as np
 import pandas as pd
 
 from src.streamlit_dashboard import prediction_dataframe, strategy_curve_from_validation
+from tests.fixture_data import ensure_test_artifacts
 
 
 class ProjectArtifactTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        ensure_test_artifacts(cls.ROOT)
 
     def test_required_artifacts_exist(self):
         required = [

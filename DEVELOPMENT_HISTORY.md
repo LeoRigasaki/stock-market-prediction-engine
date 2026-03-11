@@ -331,10 +331,10 @@ The system's 4.25 Sharpe ratio and professional architecture demonstrate both te
 **Live Demo Commands:**
 ```bash
 # Interactive Dashboard
-docker run -p 8501:8501 -e SERVICE_TYPE=dashboard leorigasaki535/stock-prediction-dashboard:latest
+docker run -p 8501:8501 -e SERVICE_TYPE=dashboard leorigasaki/stock-prediction-dashboard:latest
 
 # REST API
-docker run -p 8000:8000 -e SERVICE_TYPE=api leorigasaki535/stock-prediction-api:latest
+docker run -p 8000:8000 -e SERVICE_TYPE=api leorigasaki/stock-prediction-api:latest
 
 # Complete System
 curl -O https://raw.githubusercontent.com/LeoRigasaki/Stock-Engine/main/docker-compose-public.yml
@@ -342,8 +342,8 @@ docker-compose -f docker-compose-public.yml up
 ```
 
 **Portfolio Links:**
-- **Dashboard**: https://hub.docker.com/r/leorigasaki535/stock-prediction-dashboard
-- **API**: https://hub.docker.com/r/leorigasaki535/stock-prediction-api
+- **Dashboard**: https://hub.docker.com/r/leorigasaki/stock-prediction-dashboard
+- **API**: https://hub.docker.com/r/leorigasaki/stock-prediction-api
 - **GitHub**: https://github.com/LeoRigasaki/Stock-Engine
 
 ---

@@ -133,6 +133,27 @@ venv/bin/streamlit run src/streamlit_dashboard.py --server.port 8501 --server.ad
 Open:
 - Dashboard: [http://127.0.0.1:8501](http://127.0.0.1:8501)
 
+## Publishing Docker Images
+
+Use your own Docker Hub namespace when tagging and pushing images. If you log in as one account and push to another account's namespace, Docker Hub returns `insufficient_scope: authorization failed`.
+
+```bash
+export DOCKERHUB_NAMESPACE=your-dockerhub-username
+
+docker build -t $DOCKERHUB_NAMESPACE/stock-prediction-api:latest .
+docker push $DOCKERHUB_NAMESPACE/stock-prediction-api:latest
+
+docker tag $DOCKERHUB_NAMESPACE/stock-prediction-api:latest \
+  $DOCKERHUB_NAMESPACE/stock-prediction-dashboard:latest
+docker push $DOCKERHUB_NAMESPACE/stock-prediction-dashboard:latest
+```
+
+The public compose file also supports this namespace override:
+
+```bash
+DOCKERHUB_NAMESPACE=your-dockerhub-username docker compose -f docker-compose-public.yml up
+```
+
 ## API Example
 
 ```python

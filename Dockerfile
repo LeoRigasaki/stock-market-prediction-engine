@@ -9,7 +9,6 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
-ENV STOCK_ENGINE_API_KEY=demo_key_12345
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

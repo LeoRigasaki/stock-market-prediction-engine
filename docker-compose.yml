@@ -4,9 +4,9 @@ services:
     build: .
     container_name: stock-prediction-api
     environment:
-      - SERVICE_TYPE=api
-      - PYTHONPATH=/app
-      - STOCK_ENGINE_API_KEY=demo_key_12345
+      SERVICE_TYPE: api
+      PYTHONPATH: /app
+      STOCK_ENGINE_API_KEY: ${STOCK_ENGINE_API_KEY:-demo_key_12345}
     ports:
       - "8000:8000"
     volumes:
@@ -27,10 +27,10 @@ services:
     build: .
     container_name: stock-prediction-dashboard
     environment:
-      - SERVICE_TYPE=dashboard
-      - PYTHONPATH=/app
-      - STOCK_ENGINE_API_URL=http://stock-api:8000
-      - STOCK_ENGINE_API_KEY=demo_key_12345
+      SERVICE_TYPE: dashboard
+      PYTHONPATH: /app
+      STOCK_ENGINE_API_URL: http://stock-api:8000
+      STOCK_ENGINE_API_KEY: ${STOCK_ENGINE_API_KEY:-demo_key_12345}
     ports:
       - "8501:8501"
     volumes:
